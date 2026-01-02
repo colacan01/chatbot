@@ -1,0 +1,45 @@
+<div class="message-list-container" #scrollContainer>
+  <div class="messages-wrapper">
+    <!-- 환영 메시지 -->
+    <div class="welcome-message" *ngIf="messages.length === 0 && !isTyping">
+      <div class="welcome-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/>
+        </svg>
+      </div>
+      <h2>자전거 쇼핑 챗봇에 오신 것을 환영합니다! 🚴‍♂️</h2>
+      <p>원하시는 자전거를 찾아드리겠습니다.</p>
+      <div class="example-questions">
+        <h3>예시 질문:</h3>
+        <ul>
+          <li>• 로드 바이크 추천해주세요</li>
+          <li>• 출퇴근용 자전거를 찾고 있어요</li>
+          <li>• 배송은 얼마나 걸리나요?</li>
+          <li>• 주문 번호 ORD20250102001 배송 조회</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 메시지 목록 -->
+    <app-message-item
+      *ngFor="let message of messages; trackBy: trackByMessageId"
+      [message]="message"
+    ></app-message-item>
+
+    <!-- 타이핑 인디케이터 -->
+    <div class="typing-indicator" *ngIf="isTyping">
+      <div class="typing-avatar">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+        </svg>
+      </div>
+      <div class="typing-bubble">
+        <div class="typing-dots">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

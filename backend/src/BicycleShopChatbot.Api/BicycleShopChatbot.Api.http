@@ -1,0 +1,6 @@
+@BicycleShopChatbot.Api_HostAddress = http://localhost:5069
+
+GET {{BicycleShopChatbot.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
