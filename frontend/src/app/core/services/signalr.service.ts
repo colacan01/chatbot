@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, NgZone } from '@angular/core';
 import * as signalR from '@microsoft/signalr';
 import { Subject, Observable } from 'rxjs';
 import { ChatMessage, SendMessageRequest } from '../models/chat-message.model';
@@ -14,7 +14,7 @@ export class SignalRService {
   public messages$ = this.messageSubject.asObservable();
   public connectionState$ = this.connectionStateSubject.asObservable();
 
-  constructor() {}
+  constructor(private ngZone: NgZone) {}
 
   /**
    * SignalR 허브에 연결합니다
@@ -132,25 +132,24 @@ export class SignalRService {
       return;
     }
 
-    // 메시지 수신 핸들러
+    // 메시지 수신 핸들러 - NgZone 내에서 실행
     this.hubConnection.on('ReceiveMessage', (message: any) => {
-      console.log('📩 메시지 수신:', message);
+      this.ngZone.run(() => {
+        console.log('📩 메시지 수신:', message);
 
-      const chatMessage: ChatMessage = {
-        messageId: message.messageId,
-        sessionId: message.sessionId,
-        role: message.role,
-        content: message.content,
-        timestamp: new Date(message.timestamp),
-        category: message.category,
-        intentDetected: message.intentDetected,
-        productId: message.productId,
-        orderId: message.orderId,
-        tokensUsed: message.tokensUsed,
-        processingTimeMs: message.processingTimeMs
-      };
+        const chatMessage: ChatMessage = {
+          messageId: message.id?.toString(),
+          sessionId: message.sessionId || '',
+          role: message.role,
+          content: message.content,
+          timestamp: new Date(message.timestamp),
+          category: message.category,
+          productId: message.relatedProduct?.id,
+          orderId: message.relatedOrder?.id
+        };
 
-      this.messageSubject.next(chatMessage);
+        this.messageSubject.next(chatMessage);
+      });
     });
   }
 
@@ -163,18 +162,24 @@ export class SignalRService {
     }
 
     this.hubConnection.onreconnecting((error) => {
-      console.warn('🔄 SignalR 재연결 시도 중...', error);
-      this.connectionStateSubject.next(signalR.HubConnectionState.Reconnecting);
+      this.ngZone.run(() => {
+        console.warn('🔄 SignalR 재연결 시도 중...', error);
+        this.connectionStateSubject.next(signalR.HubConnectionState.Reconnecting);
+      });
     });
 
     this.hubConnection.onreconnected((connectionId) => {
-      console.log('✅ SignalR 재연결 성공:', connectionId);
-      this.connectionStateSubject.next(signalR.HubConnectionState.Connected);
+      this.ngZone.run(() => {
+        console.log('✅ SignalR 재연결 성공:', connectionId);
+        this.connectionStateSubject.next(signalR.HubConnectionState.Connected);
+      });
     });
 
     this.hubConnection.onclose((error) => {
-      console.error('❌ SignalR 연결 종료:', error);
-      this.connectionStateSubject.next(signalR.HubConnectionState.Disconnected);
+      this.ngZone.run(() => {
+        console.error('❌ SignalR 연결 종료:', error);
+        this.connectionStateSubject.next(signalR.HubConnectionState.Disconnected);
+      });
     });
   }
 }

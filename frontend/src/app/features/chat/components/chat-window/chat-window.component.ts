@@ -1,5 +1,6 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Subject, takeUntil } from 'rxjs';
 import { ChatService } from '../../../../core/services/chat.service';
 import { ChatMessage } from '../../../../core/models/chat-message.model';
 import { MessageListComponent } from '../message-list/message-list.component';
@@ -19,34 +20,53 @@ export class ChatWindowComponent implements OnInit, OnDestroy {
   isConnected = false;
   connectionError: string | null = null;
 
-  constructor(private chatService: ChatService) {}
+  private destroy$ = new Subject<void>();
+
+  constructor(
+    private chatService: ChatService,
+    private cdr: ChangeDetectorRef
+  ) {}
 
   ngOnInit(): void {
     // 메시지 구독
-    this.chatService.messages$.subscribe(messages => {
-      this.messages = messages;
-    });
+    this.chatService.messages$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(messages => {
+        console.log('💬 메시지 배열 업데이트:', messages.length, '개');
+        this.messages = messages;
+        this.cdr.detectChanges();
+      });
 
     // 타이핑 상태 구독
-    this.chatService.isTyping$.subscribe(isTyping => {
-      this.isTyping = isTyping;
-    });
+    this.chatService.isTyping$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(isTyping => {
+        console.log('⌨️ 타이핑 상태:', isTyping);
+        this.isTyping = isTyping;
+        this.cdr.detectChanges();
+      });
 
     // 연결 상태 구독
-    this.chatService.isConnected$.subscribe(isConnected => {
-      this.isConnected = isConnected;
-      if (!isConnected) {
-        this.connectionError = 'SignalR 연결이 끊어졌습니다.';
-      } else {
-        this.connectionError = null;
-      }
-    });
+    this.chatService.isConnected$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(isConnected => {
+        console.log('🔌 연결 상태:', isConnected);
+        this.isConnected = isConnected;
+        if (!isConnected) {
+          this.connectionError = 'SignalR 연결이 끊어졌습니다.';
+        } else {
+          this.connectionError = null;
+        }
+        this.cdr.detectChanges();
+      });
 
     // 채팅 서비스 초기화
     this.initializeChat();
   }
 
   ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
     this.chatService.disconnect();
   }
 
@@ -54,12 +74,13 @@ export class ChatWindowComponent implements OnInit, OnDestroy {
     try {
       await this.chatService.initialize(
         environment.signalRHubUrl,
-        'user-' + Date.now(), // 임시 사용자 ID
+        'user-' + Date.now(),
         '게스트 사용자'
       );
       this.connectionError = null;
+      console.log('✅ 채팅 초기화 성공');
     } catch (error) {
-      console.error('채팅 초기화 실패:', error);
+      console.error('❌ 채팅 초기화 실패:', error);
       this.connectionError = '서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.';
     }
   }

@@ -109,6 +109,7 @@ public class ChatService : IChatService
         return new ChatMessageDto
         {
             Id = assistantMessage.Id,
+            SessionId = request.SessionId,
             Role = MessageRole.Assistant.ToString(),
             Content = aiResponse,
             Timestamp = assistantMessage.Timestamp,
@@ -135,6 +136,7 @@ public class ChatService : IChatService
         return messages.Select(m => new ChatMessageDto
         {
             Id = m.Id,
+            SessionId = sessionId,
             Role = m.Role.ToString(),
             Content = m.Content,
             Timestamp = m.Timestamp,

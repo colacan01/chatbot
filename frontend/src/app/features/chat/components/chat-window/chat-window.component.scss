@@ -156,3 +156,15 @@
     padding: 10px 16px;
   }
 }
+
+/* 메시지 리스트와 입력창 레이아웃 */
+app-message-list {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+app-chat-input {
+  flex-shrink: 0;
+}

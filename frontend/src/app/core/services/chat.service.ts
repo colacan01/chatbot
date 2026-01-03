@@ -25,6 +25,7 @@ export class ChatService {
   constructor(private signalRService: SignalRService) {
     // SignalR 메시지 구독
     this.signalRService.messages$.subscribe(message => {
+      console.log('🔔 ChatService에서 메시지 수신:', message);
       this.addMessage(message);
       this.setTyping(false);
     });
@@ -32,6 +33,7 @@ export class ChatService {
     // SignalR 연결 상태 구독
     this.signalRService.connectionState$.subscribe(state => {
       const isConnected = state === signalR.HubConnectionState.Connected;
+      console.log('🔌 연결 상태 변경:', isConnected);
       this.isConnectedSubject.next(isConnected);
     });
   }
@@ -149,12 +151,14 @@ export class ChatService {
    */
   private addMessage(message: ChatMessage): void {
     const currentMessages = this.messagesSubject.value;
-    this.messagesSubject.next([...currentMessages, message]);
+    const newMessages = [...currentMessages, message];
+    console.log('➕ 메시지 추가:', newMessages.length, '개 메시지');
+    this.messagesSubject.next(newMessages);
 
     // 세션 업데이트
     const session = this.sessionSubject.value;
     if (session) {
-      session.totalMessages = currentMessages.length + 1;
+      session.totalMessages = newMessages.length;
       session.lastActivityAt = new Date();
       this.sessionSubject.next(session);
     }
@@ -164,6 +168,7 @@ export class ChatService {
    * 타이핑 상태를 설정합니다
    */
   private setTyping(isTyping: boolean): void {
+    console.log('⌨️ 타이핑 상태 변경:', isTyping);
     this.isTypingSubject.next(isTyping);
   }
 
