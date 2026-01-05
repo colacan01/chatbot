@@ -2,6 +2,7 @@ import { Injectable, NgZone } from '@angular/core';
 import * as signalR from '@microsoft/signalr';
 import { Subject, Observable } from 'rxjs';
 import { ChatMessage, SendMessageRequest, ChatStreamChunk } from '../models/chat-message.model';
+import { TokenService } from './token.service';
 
 @Injectable({
   providedIn: 'root'
@@ -16,15 +17,22 @@ export class SignalRService {
   public messageChunks$ = this.messageChunkSubject.asObservable();
   public connectionState$ = this.connectionStateSubject.asObservable();
 
-  constructor(private ngZone: NgZone) {}
+  constructor(
+    private ngZone: NgZone,
+    private tokenService: TokenService
+  ) {}
 
   /**
    * SignalR 허브에 연결합니다
    * @param hubUrl SignalR 허브 URL
    */
   public startConnection(hubUrl: string): Promise<void> {
+    const accessToken = this.tokenService.getAccessToken();
+
     this.hubConnection = new signalR.HubConnectionBuilder()
-      .withUrl(hubUrl)
+      .withUrl(hubUrl, {
+        accessTokenFactory: () => accessToken || ''
+      })
       .withAutomaticReconnect([0, 2000, 5000, 10000, 30000]) // 재연결 간격 (ms)
       .configureLogging(signalR.LogLevel.Information)
       .build();

@@ -2,6 +2,7 @@ import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Subject, takeUntil } from 'rxjs';
 import { ChatService } from '../../../../core/services/chat.service';
+import { AuthService } from '../../../../core/services/auth.service';
 import { ChatMessage } from '../../../../core/models/chat-message.model';
 import { MessageListComponent } from '../message-list/message-list.component';
 import { ChatInputComponent } from '../chat-input/chat-input.component';
@@ -19,15 +20,25 @@ export class ChatWindowComponent implements OnInit, OnDestroy {
   isTyping = false;
   isConnected = false;
   connectionError: string | null = null;
+  currentUser: any = null;
 
   private destroy$ = new Subject<void>();
 
   constructor(
     private chatService: ChatService,
+    private authService: AuthService,
     private cdr: ChangeDetectorRef
   ) {}
 
   ngOnInit(): void {
+    // 현재 사용자 정보 가져오기
+    this.authService.currentUser$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(user => {
+        this.currentUser = user;
+        console.log('👤 현재 사용자:', user);
+      });
+
     // 메시지 구독
     this.chatService.messages$
       .pipe(takeUntil(this.destroy$))
@@ -72,10 +83,13 @@ export class ChatWindowComponent implements OnInit, OnDestroy {
 
   private async initializeChat(): Promise<void> {
     try {
+      const userId = this.currentUser?.id;
+      const userName = this.currentUser?.userName || '게스트 사용자';
+
       await this.chatService.initialize(
         environment.signalRHubUrl,
-        'user-' + Date.now(),
-        '게스트 사용자'
+        userId,
+        userName
       );
       this.connectionError = null;
       console.log('✅ 채팅 초기화 성공');

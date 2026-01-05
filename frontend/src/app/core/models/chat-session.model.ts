@@ -2,7 +2,7 @@ import { ChatMessage } from './chat-message.model';
 
 export interface ChatSession {
   sessionId: string;
-  userId?: string;
+  userId?: number;
   userName?: string;
   createdAt: Date;
   lastActivityAt: Date;

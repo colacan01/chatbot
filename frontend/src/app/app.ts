@@ -1,10 +1,10 @@
 import { Component } from '@angular/core';
-import { ChatWindowComponent } from './features/chat/components/chat-window/chat-window.component';
+import { RouterOutlet } from '@angular/router';
 
 @Component({
   selector: 'app-root',
-  imports: [ChatWindowComponent],
-  template: '<app-chat-window></app-chat-window>',
+  imports: [RouterOutlet],
+  templateUrl: './app.html',
   styleUrl: './app.scss'
 })
 export class App {

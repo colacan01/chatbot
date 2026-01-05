@@ -250,7 +250,7 @@ public class ChatService : IChatService
 
     public async Task<ChatSessionDto> GetOrCreateSessionAsync(
         string sessionId,
-        string? userId = null,
+        int? userId = null,
         string? userName = null,
         CancellationToken cancellationToken = default)
     {

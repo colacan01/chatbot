@@ -19,7 +19,7 @@ public interface IChatService
 
     Task<ChatSessionDto> GetOrCreateSessionAsync(
         string sessionId,
-        string? userId = null,
+        int? userId = null,
         string? userName = null,
         CancellationToken cancellationToken = default);
 }

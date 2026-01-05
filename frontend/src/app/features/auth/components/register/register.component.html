@@ -1,0 +1,93 @@
+<div class="register-container">
+  <div class="register-card">
+    <div class="register-header">
+      <h1>회원가입</h1>
+      <p>자전거 쇼핑 챗봇에서 다양한 서비스를 경험하세요</p>
+    </div>
+
+    <form [formGroup]="registerForm" (ngSubmit)="onSubmit()" class="register-form">
+      <div class="form-group">
+        <label for="email">이메일</label>
+        <input
+          id="email"
+          type="email"
+          formControlName="email"
+          placeholder="이메일을 입력하세요"
+          [class.error]="email?.invalid && email?.touched"
+        />
+        <div class="error-message" *ngIf="email?.invalid && email?.touched">
+          <span *ngIf="email?.errors?.['required']">이메일은 필수 항목입니다.</span>
+          <span *ngIf="email?.errors?.['email']">올바른 이메일 형식이 아닙니다.</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="userName">사용자명</label>
+        <input
+          id="userName"
+          type="text"
+          formControlName="userName"
+          placeholder="사용자명을 입력하세요"
+          [class.error]="userName?.invalid && userName?.touched"
+        />
+        <div class="error-message" *ngIf="userName?.invalid && userName?.touched">
+          <span *ngIf="userName?.errors?.['required']">사용자명은 필수 항목입니다.</span>
+          <span *ngIf="userName?.errors?.['minlength']">사용자명은 최소 3자 이상이어야 합니다.</span>
+          <span *ngIf="userName?.errors?.['maxlength']">사용자명은 최대 20자까지 가능합니다.</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="password">비밀번호</label>
+        <input
+          id="password"
+          type="password"
+          formControlName="password"
+          placeholder="비밀번호를 입력하세요 (최소 8자)"
+          [class.error]="password?.invalid && password?.touched"
+        />
+        <div class="error-message" *ngIf="password?.invalid && password?.touched">
+          <span *ngIf="password?.errors?.['required']">비밀번호는 필수 항목입니다.</span>
+          <span *ngIf="password?.errors?.['minlength']">비밀번호는 최소 8자 이상이어야 합니다.</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="confirmPassword">비밀번호 확인</label>
+        <input
+          id="confirmPassword"
+          type="password"
+          formControlName="confirmPassword"
+          placeholder="비밀번호를 다시 입력하세요"
+          [class.error]="(confirmPassword?.invalid && confirmPassword?.touched) || passwordMismatch"
+        />
+        <div class="error-message" *ngIf="confirmPassword?.invalid && confirmPassword?.touched">
+          <span *ngIf="confirmPassword?.errors?.['required']">비밀번호 확인은 필수 항목입니다.</span>
+        </div>
+        <div class="error-message" *ngIf="passwordMismatch">
+          <span>비밀번호가 일치하지 않습니다.</span>
+        </div>
+      </div>
+
+      <div class="error-banner" *ngIf="errorMessage">
+        {{ errorMessage }}
+      </div>
+
+      <button 
+        type="submit" 
+        class="btn-register" 
+        [disabled]="isLoading"
+      >
+        <span *ngIf="!isLoading">회원가입</span>
+        <span *ngIf="isLoading">가입 중...</span>
+      </button>
+    </form>
+
+    <div class="register-footer">
+      <p>
+        이미 계정이 있으신가요? 
+        <a routerLink="/auth/login">로그인</a>
+      </p>
+    </div>
+  </div>
+</div>

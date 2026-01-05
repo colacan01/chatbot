@@ -53,7 +53,7 @@ export class ChatService {
    * @param userId 사용자 ID (선택사항)
    * @param userName 사용자 이름 (선택사항)
    */
-  public async initialize(hubUrl: string, userId?: string, userName?: string): Promise<void> {
+  public async initialize(hubUrl: string, userId?: number, userName?: string): Promise<void> {
     this.hubUrl = hubUrl;
     this.sessionId = this.generateSessionId();
 

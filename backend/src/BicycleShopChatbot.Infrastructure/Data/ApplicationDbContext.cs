@@ -14,6 +14,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<Product> Products => Set<Product>();
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<FAQ> FAQs => Set<FAQ>();
+    public DbSet<User> Users => Set<User>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
