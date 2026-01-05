@@ -5,7 +5,6 @@ using System.Text;
 using BicycleShopChatbot.Application.DTOs;
 using BicycleShopChatbot.Application.Interfaces;
 using BicycleShopChatbot.Domain.Entities;
-using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
 namespace BicycleShopChatbot.Infrastructure.Auth;
@@ -14,9 +13,14 @@ public class JwtTokenService : IJwtTokenService
 {
     private readonly JwtSettings _jwtSettings;
 
-    public JwtTokenService(IOptions<JwtSettings> jwtSettings)
+    public JwtTokenService(JwtSettings jwtSettings)
     {
-        _jwtSettings = jwtSettings.Value;
+        _jwtSettings = jwtSettings ?? throw new ArgumentNullException(nameof(jwtSettings), "JwtSettings is not configured.");
+
+        if (string.IsNullOrWhiteSpace(_jwtSettings.Secret))
+        {
+            throw new InvalidOperationException("JWT Secret is not configured or is empty.");
+        }
     }
 
     public string GenerateAccessToken(User user)

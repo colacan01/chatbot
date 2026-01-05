@@ -38,16 +38,35 @@ builder.Services.AddCors(options =>
 });
 
 // JWT 설정
-var jwtSettings = builder.Configuration.GetSection("JwtSettings");
-builder.Services.Configure<BicycleShopChatbot.Application.DTOs.JwtSettings>(jwtSettings);
+var jwtSettingsSection = builder.Configuration.GetSection("JwtSettings");
+var jwtSettings = new BicycleShopChatbot.Application.DTOs.JwtSettings();
+jwtSettingsSection.Bind(jwtSettings);
 
-var secret = jwtSettings.Get<BicycleShopChatbot.Application.DTOs.JwtSettings>()?.Secret;
-Console.WriteLine($"🔑 JWT Secret loaded: {(!string.IsNullOrEmpty(secret) ? "Yes" : "No")} (Length: {secret?.Length ?? 0})");
+Console.WriteLine($"🔑 JWT Secret loaded: {(!string.IsNullOrEmpty(jwtSettings.Secret) ? "Yes" : "No")} (Length: {jwtSettings.Secret?.Length ?? 0})");
+Console.WriteLine($"🔑 JWT Issuer: {jwtSettings.Issuer}");
+Console.WriteLine($"🔑 JWT Audience: {jwtSettings.Audience}");
 
-if (string.IsNullOrEmpty(secret))
+if (string.IsNullOrEmpty(jwtSettings.Secret))
 {
-    throw new InvalidOperationException("JWT Secret is not configured.");
+    throw new InvalidOperationException("JWT Secret is not configured in appsettings.json.");
 }
+
+// Register JwtSettings as Singleton directly (not IOptions)
+builder.Services.AddSingleton<BicycleShopChatbot.Application.DTOs.JwtSettings>(jwtSettings);
+// Also register the Infrastructure.Auth version for backwards compatibility
+builder.Services.AddSingleton<BicycleShopChatbot.Infrastructure.Auth.JwtSettings>(sp =>
+{
+    var appSettings = sp.GetRequiredService<BicycleShopChatbot.Application.DTOs.JwtSettings>();
+    var infraSettings = new BicycleShopChatbot.Infrastructure.Auth.JwtSettings
+    {
+        Secret = appSettings.Secret,
+        Issuer = appSettings.Issuer,
+        Audience = appSettings.Audience,
+        AccessTokenExpirationMinutes = appSettings.AccessTokenExpirationMinutes,
+        RefreshTokenExpirationDays = appSettings.RefreshTokenExpirationDays
+    };
+    return infraSettings;
+});
 
 builder.Services.AddAuthentication(options =>
 {
@@ -62,9 +81,9 @@ builder.Services.AddAuthentication(options =>
         ValidateAudience = true,
         ValidateLifetime = true,
         ValidateIssuerSigningKey = true,
-        ValidIssuer = jwtSettings.Get<BicycleShopChatbot.Application.DTOs.JwtSettings>()?.Issuer,
-        ValidAudience = jwtSettings.Get<BicycleShopChatbot.Application.DTOs.JwtSettings>()?.Audience,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret)),
+        ValidIssuer = jwtSettings.Issuer,
+        ValidAudience = jwtSettings.Audience,
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.Secret)),
         ClockSkew = TimeSpan.Zero
     };
 
