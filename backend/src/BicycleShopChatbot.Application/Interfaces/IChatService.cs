@@ -8,6 +8,10 @@ public interface IChatService
         SendMessageRequest request,
         CancellationToken cancellationToken = default);
 
+    IAsyncEnumerable<ChatStreamChunk> ProcessUserMessageStreamAsync(
+        SendMessageRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<List<ChatMessageDto>> GetConversationHistoryAsync(
         string sessionId,
         int messageCount = 50,

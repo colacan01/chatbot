@@ -1,7 +1,7 @@
 import { Injectable, NgZone } from '@angular/core';
 import * as signalR from '@microsoft/signalr';
 import { Subject, Observable } from 'rxjs';
-import { ChatMessage, SendMessageRequest } from '../models/chat-message.model';
+import { ChatMessage, SendMessageRequest, ChatStreamChunk } from '../models/chat-message.model';
 
 @Injectable({
   providedIn: 'root'
@@ -9,9 +9,11 @@ import { ChatMessage, SendMessageRequest } from '../models/chat-message.model';
 export class SignalRService {
   private hubConnection?: signalR.HubConnection;
   private messageSubject = new Subject<ChatMessage>();
+  private messageChunkSubject = new Subject<ChatStreamChunk>();
   private connectionStateSubject = new Subject<signalR.HubConnectionState>();
 
   public messages$ = this.messageSubject.asObservable();
+  public messageChunks$ = this.messageChunkSubject.asObservable();
   public connectionState$ = this.connectionStateSubject.asObservable();
 
   constructor(private ngZone: NgZone) {}
@@ -111,6 +113,24 @@ export class SignalRService {
   }
 
   /**
+   * 스트리밍 방식으로 메시지를 전송합니다
+   * @param request 메시지 전송 요청
+   */
+  public sendMessageStream(request: SendMessageRequest): Promise<void> {
+    if (!this.hubConnection) {
+      return Promise.reject('SignalR 연결이 없습니다.');
+    }
+
+    console.log('📤 스트리밍 메시지 전송:', request.message);
+
+    return this.hubConnection.invoke('SendMessageStream', request)
+      .catch(err => {
+        console.error('❌ 스트리밍 메시지 전송 실패:', err);
+        throw err;
+      });
+  }
+
+  /**
    * 현재 연결 상태를 반환합니다
    */
   public getConnectionState(): signalR.HubConnectionState | undefined {
@@ -149,6 +169,40 @@ export class SignalRService {
         };
 
         this.messageSubject.next(chatMessage);
+      });
+    });
+
+    // 스트리밍 청크 수신 핸들러
+    this.hubConnection.on('ReceiveMessageChunk', (chunk: any) => {
+      this.ngZone.run(() => {
+        console.log('📦 스트리밍 청크 수신 (raw):', chunk);
+
+        const streamChunk: ChatStreamChunk = {
+          sessionId: chunk.sessionId,
+          messageId: chunk.messageId,
+          content: chunk.content,
+          isComplete: chunk.isComplete,
+          timestamp: chunk.timestamp?.toString() || new Date().toISOString(),
+          category: chunk.category
+        };
+
+        console.log('📦 변환된 청크:', streamChunk);
+
+        this.messageChunkSubject.next(streamChunk);
+      });
+    });
+
+    // 스트리밍 에러 핸들러
+    this.hubConnection.on('StreamError', (errorMessage: string) => {
+      this.ngZone.run(() => {
+        console.error('❌ 스트리밍 에러:', errorMessage);
+      });
+    });
+
+    // 스트리밍 취소 핸들러
+    this.hubConnection.on('StreamCancelled', (sessionId: string) => {
+      this.ngZone.run(() => {
+        console.warn('⚠️ 스트리밍 취소:', sessionId);
       });
     });
   }

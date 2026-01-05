@@ -35,6 +35,35 @@ public class ChatHub : Hub
         }
     }
 
+    public async Task SendMessageStream(SendMessageRequest request)
+    {
+        try
+        {
+            _logger.LogInformation(
+                "Streaming message from session {SessionId}: {Message}",
+                request.SessionId,
+                request.Message.Substring(0, Math.Min(50, request.Message.Length)));
+
+            await foreach (var chunk in _chatService.ProcessUserMessageStreamAsync(request))
+            {
+                // 각 청크를 클라이언트로 즉시 전송
+                await Clients.Caller.SendAsync("ReceiveMessageChunk", chunk);
+            }
+
+            _logger.LogInformation("Streaming completed for session {SessionId}", request.SessionId);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("Streaming cancelled for session {SessionId}", request.SessionId);
+            await Clients.Caller.SendAsync("StreamCancelled", request.SessionId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during streaming in ChatHub");
+            await Clients.Caller.SendAsync("StreamError", "스트리밍 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
+        }
+    }
+
     public async Task JoinSession(string sessionId)
     {
         await Groups.AddToGroupAsync(Context.ConnectionId, sessionId);

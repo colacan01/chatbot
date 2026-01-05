@@ -1,6 +1,7 @@
 <div class="message-item" [ngClass]="{
   'user-message': isUser,
-  'assistant-message': isAssistant
+  'assistant-message': isAssistant,
+  'streaming': isStreaming
 }">
   <div class="message-wrapper">
     <div class="message-avatar" *ngIf="isAssistant">
@@ -12,11 +13,15 @@
     <div class="message-content-wrapper">
       <div class="message-bubble">
         <div class="message-content" [innerHTML]="formattedContent"></div>
+        <span class="streaming-cursor" *ngIf="isStreaming">▊</span>
       </div>
 
       <div class="message-meta">
         <span class="message-time">{{ timeAgo }}</span>
-        <span class="message-category" *ngIf="message.category && isAssistant">
+        <span class="streaming-indicator" *ngIf="isStreaming">
+          · 생성 중...
+        </span>
+        <span class="message-category" *ngIf="message.category && isAssistant && !isStreaming">
           · {{ message.category }}
         </span>
         <span class="processing-time" *ngIf="message.processingTimeMs && isAssistant">

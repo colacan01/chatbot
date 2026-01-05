@@ -112,3 +112,50 @@
 .processing-time {
   white-space: nowrap;
 }
+
+// 스트리밍 커서 애니메이션
+.streaming-cursor {
+  display: inline-block;
+  margin-left: 2px;
+  animation: blink 1s step-end infinite;
+  color: #3b82f6;
+  font-weight: bold;
+}
+
+@keyframes blink {
+  0%, 50% {
+    opacity: 1;
+  }
+  51%, 100% {
+    opacity: 0;
+  }
+}
+
+// 스트리밍 중인 메시지 스타일
+.message-item.streaming {
+  .message-bubble {
+    background: linear-gradient(
+      90deg,
+      rgba(59, 130, 246, 0.05) 0%,
+      rgba(59, 130, 246, 0.1) 50%,
+      rgba(59, 130, 246, 0.05) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s infinite;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.streaming-indicator {
+  color: #3b82f6;
+  font-weight: 500;
+}

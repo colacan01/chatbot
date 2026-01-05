@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable } from 'rxjs';
 import * as signalR from '@microsoft/signalr';
 import { SignalRService } from './signalr.service';
-import { ChatMessage, SendMessageRequest, MessageRole } from '../models/chat-message.model';
+import { ChatMessage, SendMessageRequest, MessageRole, ChatStreamChunk } from '../models/chat-message.model';
 import { ChatSession } from '../models/chat-session.model';
 
 @Injectable({
@@ -22,12 +22,21 @@ export class ChatService {
   private sessionId: string = '';
   private hubUrl: string = '';
 
+  // 스트리밍 상태 관리
+  private streamingMessages = new Map<string, ChatMessage>();
+
   constructor(private signalRService: SignalRService) {
     // SignalR 메시지 구독
     this.signalRService.messages$.subscribe(message => {
       console.log('🔔 ChatService에서 메시지 수신:', message);
       this.addMessage(message);
       this.setTyping(false);
+    });
+
+    // 스트리밍 청크 구독
+    this.signalRService.messageChunks$.subscribe(chunk => {
+      console.log('🔔 ChatService에서 청크 수신:', chunk.messageId);
+      this.handleStreamChunk(chunk);
     });
 
     // SignalR 연결 상태 구독
@@ -122,6 +131,51 @@ export class ChatService {
   }
 
   /**
+   * 스트리밍 방식으로 메시지를 전송합니다
+   * @param message 메시지 내용
+   */
+  public async sendMessageStream(message: string): Promise<void> {
+    if (!message || message.trim().length === 0) {
+      return;
+    }
+
+    const session = this.sessionSubject.value;
+    if (!session) {
+      throw new Error('세션이 초기화되지 않았습니다.');
+    }
+
+    // 사용자 메시지를 UI에 즉시 추가
+    const userMessage: ChatMessage = {
+      sessionId: this.sessionId,
+      role: MessageRole.User,
+      content: message.trim(),
+      timestamp: new Date()
+    };
+    this.addMessage(userMessage);
+
+    // 봇이 타이핑 중 표시
+    this.setTyping(true);
+
+    // SignalR로 스트리밍 메시지 전송
+    const request: SendMessageRequest = {
+      sessionId: this.sessionId,
+      message: message.trim(),
+      userId: session.userId,
+      userName: session.userName
+    };
+
+    try {
+      await this.signalRService.sendMessageStream(request);
+    } catch (error) {
+      console.error('❌ 스트리밍 메시지 전송 실패:', error);
+      this.setTyping(false);
+      // 스트리밍 실패 시 기존 방식으로 폴백
+      this.streamingMessages.clear();
+      throw error;
+    }
+  }
+
+  /**
    * 연결을 종료합니다
    */
   public async disconnect(): Promise<void> {
@@ -179,5 +233,81 @@ export class ChatService {
     const timestamp = Date.now();
     const random = Math.random().toString(36).substring(2, 15);
     return `session-${timestamp}-${random}`;
+  }
+
+  /**
+   * 스트리밍 청크를 처리합니다
+   */
+  private handleStreamChunk(chunk: ChatStreamChunk): void {
+    console.log('🔷 청크 처리 시작:', {
+      messageId: chunk.messageId,
+      contentLength: chunk.content?.length || 0,
+      isComplete: chunk.isComplete,
+      category: chunk.category
+    });
+
+    let streamingMessage = this.streamingMessages.get(chunk.messageId);
+
+    if (!streamingMessage) {
+      // 새로운 스트리밍 메시지 생성
+      console.log('🆕 새 스트리밍 메시지 생성:', chunk.messageId);
+      streamingMessage = {
+        messageId: chunk.messageId,
+        sessionId: chunk.sessionId,
+        role: MessageRole.Assistant,
+        content: '',
+        timestamp: new Date(chunk.timestamp),
+        category: chunk.category as any,
+        isStreaming: true,
+        streamComplete: false
+      };
+
+      this.streamingMessages.set(chunk.messageId, streamingMessage);
+
+      // 메시지 배열에 추가
+      const currentMessages = this.messagesSubject.value;
+      this.messagesSubject.next([...currentMessages, streamingMessage]);
+      console.log('📝 메시지 배열에 추가됨. 총 메시지:', currentMessages.length + 1);
+    }
+
+    if (chunk.isComplete) {
+      // 스트리밍 완료
+      console.log('✅ 스트리밍 완료:', {
+        messageId: chunk.messageId,
+        finalContentLength: streamingMessage.content.length,
+        content: streamingMessage.content.substring(0, 100) + '...'
+      });
+      
+      streamingMessage.isStreaming = false;
+      streamingMessage.streamComplete = true;
+      this.streamingMessages.delete(chunk.messageId);
+      this.setTyping(false);
+    } else {
+      // 청크 내용 추가
+      const beforeLength = streamingMessage.content.length;
+      streamingMessage.content += chunk.content;
+      console.log('📝 청크 내용 추가:', {
+        messageId: chunk.messageId,
+        beforeLength,
+        chunkLength: chunk.content.length,
+        afterLength: streamingMessage.content.length
+      });
+    }
+
+    // 메시지 배열 업데이트 (불변성 유지)
+    const currentMessages = this.messagesSubject.value;
+    const updatedMessages = currentMessages.map(msg =>
+      msg.messageId === chunk.messageId ? { ...streamingMessage! } : msg
+    );
+
+    console.log('🔄 메시지 배열 업데이트 완료. 총:', updatedMessages.length);
+    this.messagesSubject.next(updatedMessages);
+
+    // 세션 업데이트
+    const session = this.sessionSubject.value;
+    if (session) {
+      session.lastActivityAt = new Date();
+      this.sessionSubject.next(session);
+    }
   }
 }

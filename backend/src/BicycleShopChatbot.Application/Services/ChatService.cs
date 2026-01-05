@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using BicycleShopChatbot.Application.DTOs;
 using BicycleShopChatbot.Application.Interfaces;
@@ -115,6 +117,108 @@ public class ChatService : IChatService
             Timestamp = assistantMessage.Timestamp,
             Category = intent.ToString()
         };
+    }
+
+    public async IAsyncEnumerable<ChatStreamChunk> ProcessUserMessageStreamAsync(
+        SendMessageRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+
+        // 1. 세션 생성/조회 및 사용자 메시지 저장
+        var session = await GetOrCreateSessionAsync(
+            request.SessionId,
+            request.UserId,
+            request.UserName,
+            cancellationToken);
+
+        var userMessage = new ChatMessage
+        {
+            ChatSessionId = session.Id,
+            Role = MessageRole.User,
+            Content = request.Message,
+            Timestamp = DateTime.UtcNow
+        };
+
+        await _messageRepository.AddAsync(userMessage, cancellationToken);
+        await _messageRepository.SaveChangesAsync(cancellationToken);
+
+        // 2. 대화 히스토리 및 Intent 감지
+        var conversationHistory = await GetConversationHistoryAsync(
+            request.SessionId,
+            20,
+            cancellationToken);
+
+        var intent = _promptService.DetectIntent(request.Message);
+        _logger.LogInformation("Detected intent: {Intent} for streaming message", intent);
+
+        var systemPrompt = await BuildContextualPromptAsync(intent, request.Message, cancellationToken);
+
+        // 3. 스트리밍 시작
+        var messageId = Guid.NewGuid().ToString();
+        var fullContent = new StringBuilder();
+
+        await foreach (var chunk in _ollamaService.GenerateResponseStreamAsync(
+            request.Message,
+            conversationHistory,
+            systemPrompt,
+            cancellationToken))
+        {
+            fullContent.Append(chunk);
+
+            yield return new ChatStreamChunk
+            {
+                SessionId = request.SessionId,
+                MessageId = messageId,
+                Content = chunk,
+                IsComplete = false,
+                Timestamp = DateTime.UtcNow,
+                Category = intent.ToString()
+            };
+        }
+
+        // 4. 스트리밍 완료 후 DB 저장
+        stopwatch.Stop();
+
+        var assistantMessage = new ChatMessage
+        {
+            ChatSessionId = session.Id,
+            Role = MessageRole.Assistant,
+            Content = fullContent.ToString(),
+            Timestamp = DateTime.UtcNow,
+            Category = intent,
+            IntentDetected = intent.ToString(),
+            ProcessingTimeMs = (int)stopwatch.ElapsedMilliseconds
+        };
+
+        await _messageRepository.AddAsync(assistantMessage, cancellationToken);
+
+        // 5. 세션 업데이트
+        var sessionEntity = await _sessionRepository.GetBySessionIdAsync(request.SessionId, cancellationToken);
+        if (sessionEntity != null)
+        {
+            sessionEntity.LastActivityAt = DateTime.UtcNow;
+            sessionEntity.TotalMessages += 2;
+            _sessionRepository.Update(sessionEntity);
+        }
+
+        await _sessionRepository.SaveChangesAsync(cancellationToken);
+
+        // 6. 완료 청크 전송
+        yield return new ChatStreamChunk
+        {
+            SessionId = request.SessionId,
+            MessageId = messageId,
+            Content = string.Empty,
+            IsComplete = true,
+            Timestamp = DateTime.UtcNow,
+            Category = intent.ToString()
+        };
+
+        _logger.LogInformation(
+            "Streaming completed in {ElapsedMs}ms, total {Length} chars",
+            stopwatch.ElapsedMilliseconds,
+            fullContent.Length);
     }
 
     public async Task<List<ChatMessageDto>> GetConversationHistoryAsync(

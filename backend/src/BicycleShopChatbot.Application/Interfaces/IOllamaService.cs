@@ -10,5 +10,11 @@ public interface IOllamaService
         string systemPrompt,
         CancellationToken cancellationToken = default);
 
+    IAsyncEnumerable<string> GenerateResponseStreamAsync(
+        string userMessage,
+        List<ChatMessageDto> conversationHistory,
+        string systemPrompt,
+        CancellationToken cancellationToken = default);
+
     Task<bool> IsModelAvailableAsync(CancellationToken cancellationToken = default);
 }

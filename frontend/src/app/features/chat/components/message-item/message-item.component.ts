@@ -24,6 +24,10 @@ export class MessageItemComponent {
     return this.message.role === MessageRole.Assistant;
   }
 
+  get isStreaming(): boolean {
+    return this.message.isStreaming === true;
+  }
+
   get timeAgo(): string {
     return formatDistanceToNow(this.message.timestamp, {
       addSuffix: true,

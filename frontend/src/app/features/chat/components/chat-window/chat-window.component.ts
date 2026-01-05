@@ -87,10 +87,18 @@ export class ChatWindowComponent implements OnInit, OnDestroy {
 
   async onSendMessage(message: string): Promise<void> {
     try {
-      await this.chatService.sendMessage(message);
+      // 스트리밍 방식으로 메시지 전송
+      await this.chatService.sendMessageStream(message);
     } catch (error) {
-      console.error('메시지 전송 실패:', error);
-      this.connectionError = '메시지 전송에 실패했습니다.';
+      console.error('스트리밍 메시지 전송 실패, 기존 방식으로 재시도:', error);
+
+      // 스트리밍 실패 시 기존 방식으로 폴백
+      try {
+        await this.chatService.sendMessage(message);
+      } catch (fallbackError) {
+        console.error('메시지 전송 완전 실패:', fallbackError);
+        this.connectionError = '메시지 전송에 실패했습니다.';
+      }
     }
   }
 
