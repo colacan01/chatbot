@@ -92,10 +92,29 @@ public class ChatHub : Hub
             _logger.LogWarning("Streaming cancelled for session {SessionId}", request.SessionId);
             await Clients.Caller.SendAsync("StreamCancelled", request.SessionId);
         }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "Network error during streaming for session {SessionId}", request.SessionId);
+            await Clients.Caller.SendAsync("StreamError",
+                "네트워크 연결 오류가 발생했습니다. AI 서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.");
+        }
+        catch (TimeoutException ex)
+        {
+            _logger.LogError(ex, "Timeout during streaming for session {SessionId}", request.SessionId);
+            await Clients.Caller.SendAsync("StreamError",
+                "응답 시간이 초과되었습니다. AI 모델이 복잡한 요청을 처리 중이거나 서버가 과부하 상태입니다. 잠시 후 다시 시도해주세요.");
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogError(ex, "Invalid operation during streaming for session {SessionId}", request.SessionId);
+            await Clients.Caller.SendAsync("StreamError",
+                "AI 서버 응답 형식 오류가 발생했습니다. 관리자에게 문의해주세요.");
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during streaming in ChatHub");
-            await Clients.Caller.SendAsync("StreamError", "스트리밍 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
+            _logger.LogError(ex, "Unexpected error during streaming in ChatHub");
+            await Clients.Caller.SendAsync("StreamError",
+                "예상치 못한 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
         }
     }
 

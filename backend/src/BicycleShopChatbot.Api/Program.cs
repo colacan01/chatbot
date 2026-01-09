@@ -129,7 +129,28 @@ builder.Services.AddScoped<IOrderContextService, OrderContextService>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IPasswordHasher, BCryptPasswordHasher>();
 
-builder.Services.AddHttpClient<IOllamaService, OllamaService>();
+builder.Services.AddHttpClient<IOllamaService, OllamaService>()
+    .ConfigurePrimaryHttpMessageHandler(() =>
+    {
+        return new SocketsHttpHandler
+        {
+            // 연결 풀링: 오래된 연결 재사용 방지
+            PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+            MaxConnectionsPerServer = 10,
+
+            // Keep-alive: 유휴 연결 종료 방지
+            KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+            KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
+            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
+
+            // 연결 타임아웃 (요청 타임아웃과 별개)
+            ConnectTimeout = TimeSpan.FromSeconds(30),
+
+            MaxResponseHeadersLength = 128
+        };
+    })
+    .SetHandlerLifetime(TimeSpan.FromMinutes(30));
 
 builder.Services.AddLogging(logging =>
 {

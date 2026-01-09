@@ -13,6 +13,7 @@ public class OllamaService : IOllamaService
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<OllamaService> _logger;
+    private readonly IConfiguration _configuration;
     private readonly string _modelName;
     private readonly double _temperature;
 
@@ -22,6 +23,7 @@ public class OllamaService : IOllamaService
         ILogger<OllamaService> logger)
     {
         _httpClient = httpClient;
+        _configuration = configuration;
         _logger = logger;
         _modelName = configuration["Ollama:ModelName"] ?? "qwen2.5:14b";
         _temperature = double.Parse(configuration["Ollama:DefaultTemperature"] ?? "0.7");
@@ -118,60 +120,108 @@ public class OllamaService : IOllamaService
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/api/chat");
         httpRequest.Content = JsonContent.Create(request);
 
-        using var response = await _httpClient.SendAsync(
-            httpRequest,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
+        // 헤더 추가
+        httpRequest.Headers.Add("Accept", "application/x-ndjson");
+        httpRequest.Headers.ConnectionClose = false;
 
-        response.EnsureSuccessStatusCode();
-
-        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var reader = new StreamReader(stream);
-
-        _logger.LogInformation("🔍 Starting to read stream from Ollama...");
-        int lineCount = 0;
-        int chunkCount = 0;
-
-        while (!reader.EndOfStream)
+        HttpResponseMessage response;
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            response = await _httpClient.SendAsync(
+                httpRequest,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
 
-            var line = await reader.ReadLineAsync();
-            lineCount++;
-
-            _logger.LogInformation("📝 Line {LineCount}: {Line}", lineCount, line?.Substring(0, Math.Min(100, line?.Length ?? 0)));
-
-            if (string.IsNullOrWhiteSpace(line))
+            // 상태 코드 확인 강화
+            if (!response.IsSuccessStatusCode)
             {
-                _logger.LogInformation("⏭️ Skipping empty line {LineCount}", lineCount);
-                continue;
-            }
-
-            var chunk = JsonSerializer.Deserialize<OllamaStreamResponse>(line, new JsonSerializerOptions 
-            { 
-                PropertyNameCaseInsensitive = true 
-            });
-
-            _logger.LogInformation("🔷 Chunk {ChunkCount}: Done={Done}, Content={Content}", 
-                chunkCount, 
-                chunk?.Done, 
-                chunk?.Message?.Content?.Substring(0, Math.Min(50, chunk?.Message?.Content?.Length ?? 0)));
-
-            if (chunk?.Message?.Content != null)
-            {
-                chunkCount++;
-                _logger.LogInformation("✅ Yielding chunk {ChunkCount} with {Length} chars", chunkCount, chunk.Message.Content.Length);
-                yield return chunk.Message.Content;
-            }
-
-            if (chunk?.Done == true)
-            {
-                _logger.LogInformation("✅ Streaming completed successfully. Total chunks: {ChunkCount}", chunkCount);
-                break;
+                var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogError(
+                    "Ollama API returned {StatusCode}: {ErrorContent}",
+                    response.StatusCode,
+                    errorContent);
+                throw new HttpRequestException(
+                    $"Ollama API error: {response.StatusCode}");
             }
         }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex,
+                "HTTP connection error. Check network to {BaseUrl}",
+                _httpClient.BaseAddress);
+            throw new InvalidOperationException(
+                $"Failed to connect to Ollama at {_httpClient.BaseAddress}. " +
+                "Verify server is running and accessible.", ex);
+        }
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "Streaming connection timeout");
+            throw new TimeoutException(
+                "Streaming connection timed out. Server may be overloaded.", ex);
+        }
 
-        _logger.LogInformation("🏁 Stream reading finished. Lines: {LineCount}, Chunks: {ChunkCount}", lineCount, chunkCount);
+        using (response)
+        {
+            var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using (stream)
+            using (var reader = new StreamReader(stream))
+            {
+                _logger.LogInformation("Successfully started stream from Ollama");
+                int lineCount = 0;
+                int chunkCount = 0;
+
+                while (!reader.EndOfStream)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var line = await reader.ReadLineAsync();
+                    lineCount++;
+
+                    _logger.LogDebug("Line {LineCount}: {Line}",
+                        lineCount,
+                        line?.Substring(0, Math.Min(100, line?.Length ?? 0)));
+
+                    if (string.IsNullOrWhiteSpace(line))
+                    {
+                        continue;
+                    }
+
+                    OllamaStreamResponse? chunk;
+                    try
+                    {
+                        chunk = JsonSerializer.Deserialize<OllamaStreamResponse>(line, new JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true
+                        });
+                    }
+                    catch (JsonException ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to parse line {LineCount}: {Line}", lineCount, line);
+                        continue;
+                    }
+
+                    if (chunk?.Message?.Content != null)
+                    {
+                        chunkCount++;
+                        _logger.LogDebug("Yielding chunk {ChunkCount} with {Length} chars",
+                            chunkCount,
+                            chunk.Message.Content.Length);
+                        yield return chunk.Message.Content;
+                    }
+
+                    if (chunk?.Done == true)
+                    {
+                        _logger.LogInformation(
+                            "Streaming completed successfully. Total chunks: {ChunkCount}",
+                            chunkCount);
+                        break;
+                    }
+                }
+
+                _logger.LogInformation("Stream reading finished. Lines: {LineCount}, Chunks: {ChunkCount}",
+                    lineCount, chunkCount);
+            }
+        }
     }
 
     public async Task<bool> IsModelAvailableAsync(CancellationToken cancellationToken = default)
@@ -190,6 +240,45 @@ public class OllamaService : IOllamaService
             _logger.LogError(ex, "Error checking if Ollama model is available");
             return false;
         }
+    }
+
+    public async Task<OllamaHealthStatus> CheckHealthAsync(CancellationToken cancellationToken = default)
+    {
+        var status = new OllamaHealthStatus
+        {
+            BaseUrl = _httpClient.BaseAddress?.ToString() ?? "Not configured",
+            CheckedAt = DateTime.UtcNow
+        };
+
+        try
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var response = await _httpClient.GetAsync("/api/tags", cancellationToken);
+            sw.Stop();
+
+            status.IsReachable = response.IsSuccessStatusCode;
+            status.ResponseTimeMs = (int)sw.ElapsedMilliseconds;
+
+            if (status.IsReachable)
+            {
+                var result = await response.Content.ReadFromJsonAsync<OllamaTagsResponse>(cancellationToken);
+                status.IsModelAvailable = result?.Models?.Any(m =>
+                    m.Name?.Contains(_modelName.Split(':')[0]) == true) ?? false;
+                status.AvailableModels = result?.Models?.Select(m => m.Name ?? "").Where(n => !string.IsNullOrEmpty(n)).ToList() ?? new List<string>();
+            }
+
+            _logger.LogInformation(
+                "Ollama health check: Reachable={IsReachable}, ModelAvailable={IsModelAvailable}, ResponseTime={ResponseTimeMs}ms",
+                status.IsReachable, status.IsModelAvailable, status.ResponseTimeMs);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Health check failed for Ollama at {BaseUrl}", _httpClient.BaseAddress);
+            status.IsReachable = false;
+            status.ErrorMessage = ex.Message;
+        }
+
+        return status;
     }
 
     private List<object> BuildMessagePayload(
@@ -214,6 +303,48 @@ public class OllamaService : IOllamaService
         messages.Add(new { role = "user", content = userMessage });
 
         return messages;
+    }
+
+    private async Task<T> ExecuteWithRetryAsync<T>(
+        Func<CancellationToken, Task<T>> operation,
+        CancellationToken cancellationToken,
+        string operationName)
+    {
+        var maxRetries = int.Parse(_configuration["Ollama:MaxRetries"] ?? "3");
+        var retryDelay = int.Parse(_configuration["Ollama:RetryDelaySeconds"] ?? "2");
+
+        for (int attempt = 1; attempt <= maxRetries; attempt++)
+        {
+            try
+            {
+                _logger.LogInformation(
+                    "Executing {Operation}, attempt {Attempt}/{MaxRetries}",
+                    operationName, attempt, maxRetries);
+
+                return await operation(cancellationToken);
+            }
+            catch (HttpRequestException ex) when (attempt < maxRetries)
+            {
+                var delay = TimeSpan.FromSeconds(retryDelay * Math.Pow(2, attempt - 1));
+                _logger.LogWarning(
+                    ex,
+                    "HTTP error on attempt {Attempt}/{MaxRetries} for {Operation}. Retrying in {Delay}s",
+                    attempt, maxRetries, operationName, delay.TotalSeconds);
+                await Task.Delay(delay, cancellationToken);
+            }
+            catch (TaskCanceledException ex) when (attempt < maxRetries && !cancellationToken.IsCancellationRequested)
+            {
+                var delay = TimeSpan.FromSeconds(retryDelay * Math.Pow(2, attempt - 1));
+                _logger.LogWarning(
+                    ex,
+                    "Timeout on attempt {Attempt}/{MaxRetries} for {Operation}. Retrying in {Delay}s",
+                    attempt, maxRetries, operationName, delay.TotalSeconds);
+                await Task.Delay(delay, cancellationToken);
+            }
+        }
+
+        _logger.LogInformation("Final attempt {MaxRetries} for {Operation}", maxRetries, operationName);
+        return await operation(cancellationToken);
     }
 
     private class OllamaResponse
@@ -241,5 +372,16 @@ public class OllamaService : IOllamaService
     private class OllamaModel
     {
         public string? Name { get; set; }
+    }
+
+    public class OllamaHealthStatus
+    {
+        public string BaseUrl { get; set; } = string.Empty;
+        public bool IsReachable { get; set; }
+        public bool IsModelAvailable { get; set; }
+        public int ResponseTimeMs { get; set; }
+        public DateTime CheckedAt { get; set; }
+        public List<string>? AvailableModels { get; set; }
+        public string? ErrorMessage { get; set; }
     }
 }
