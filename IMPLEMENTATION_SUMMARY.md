@@ -4,7 +4,7 @@
 
 자전거 온라인 샵 AI 챗봇 시스템이 성공적으로 구현되었습니다!
 
-**완료 날짜**: 2026년 1월 5일
+**완료 날짜**: 2026년 1월 9일
 
 ---
 
@@ -62,7 +62,10 @@
 - ✅ `POST /api/auth/login` - 로그인
 - ✅ `POST /api/auth/refresh` - 토큰 갱신
 - ✅ `POST /api/auth/logout` - 로그아웃
-- ✅ SignalR Hub: `SendMessage`, `JoinSession`, `LeaveSession`
+- ✅ `GET /api/chat/sessions` - 사용자 세션 목록 조회 (최근 30개)
+- ✅ `GET /api/chat/sessions/{sessionId}` - 세션 히스토리 조회
+- ✅ `DELETE /api/chat/sessions/{sessionId}` - 세션 삭제
+- ✅ SignalR Hub: `SendMessage`, `SendMessageStream`, `JoinSession`, `LeaveSession`, `LoadSessionHistory`
 
 ---
 
@@ -80,7 +83,8 @@ frontend/src/app/
 │   ├── services/
 │   │   ├── signalr.service.ts          ✅
 │   │   ├── chat.service.ts             ✅
-│   │   └── auth.service.ts             ✅
+│   │   ├── auth.service.ts             ✅
+│   │   └── token.service.ts            ✅
 │   └── guards/
 │       └── auth.guard.ts               ✅
 ├── features/
@@ -89,6 +93,7 @@ frontend/src/app/
 │   │   └── register/                   ✅
 │   └── chat/components/
 │       ├── chat-window/                ✅
+│       ├── chat-sidebar/               ✅ (NEW)
 │       ├── message-list/               ✅
 │       ├── message-item/               ✅
 │       └── chat-input/                 ✅
@@ -100,14 +105,23 @@ frontend/src/app/
 #### 2. **핵심 서비스**
 - ✅ **AuthService**: 사용자 인증 관리
   - 로그인/회원가입
-  - JWT 토큰 저장 (localStorage)
+  - JWT 토큰 관리 (TokenService 통합)
   - 토큰 자동 갱신
   - 로그아웃
+- ✅ **TokenService**: JWT 토큰 저장 및 관리
+  - localStorage 기반 토큰 저장
+  - 토큰 만료 검증
+  - 사용자 데이터 저장
 - ✅ **SignalRService**: SignalR 연결 관리
   - 재연결 로직
   - JWT 토큰 기반 인증
   - 스트리밍 청크 수신
+  - 세션 히스토리 로드
 - ✅ **ChatService**: 채팅 상태 관리 (RxJS BehaviorSubject)
+  - 세션 관리 (생성, 전환, 삭제)
+  - 메시지 스트리밍 처리
+  - 세션 목록 조회
+  - localStorage 기반 세션 복원
 
 #### 3. **컴포넌트**
 - ✅ **인증 컴포넌트**:
@@ -115,6 +129,12 @@ frontend/src/app/
   - **RegisterComponent**: 회원가입 폼 (사용자명 3-100자)
 - ✅ **채팅 컴포넌트**:
   - **ChatWindowComponent**: 메인 컨테이너, 헤더, 에러 처리
+  - **ChatSidebarComponent**: 세션 목록 사이드바 (NEW)
+    - 세션 목록 표시
+    - 세션 검색 기능
+    - 새 대화 시작
+    - 세션 삭제
+    - 접기/펼치기 토글
   - **MessageListComponent**: 메시지 목록, 자동 스크롤, 타이핑 인디케이터
   - **MessageItemComponent**: 개별 메시지 버블 (사용자/봇 스타일 분리)
   - **ChatInputComponent**: 입력 필드, 전송 버튼, 문자 수 카운터
@@ -126,8 +146,11 @@ frontend/src/app/
 - ✅ 연결 상태 표시 (연결됨/끊김)
 - ✅ 에러 메시지 배너 및 재시도 버튼
 - ✅ 환영 메시지 및 예시 질문
-- ✅ 시간 표시 (date-fns, 한국어)
+- ✅ 시간 표시 (상대 시간: "방금 전", "5분 전" 등)
 - ✅ 간단한 마크다운 파싱 (볼드, 줄바꿈)
+- ✅ 세션 관리 UI (사이드바)
+- ✅ 세션 검색 및 필터링
+- ✅ 실시간 스트리밍 메시지 표시
 
 #### 5. **스타일링**
 - ✅ Material Design 색상 (Indigo-Pink)
@@ -241,12 +264,25 @@ npm run build
   - AuthService.cs의 사용자명 검증을 100자로 변경
   - RegisterComponent의 Validator를 maxLength(100)으로 변경
 
-**3. 스트리밍 청크 수신 이슈 (진행 중 🔄)**
+**3. Angular 환경 설정 이슈 (해결됨 ✅)**
+- **문제**:
+  - API 404 에러 (잘못된 production URL 사용)
+  - 로그인/회원가입 페이지 오류
+- **원인**:
+  - angular.json에 fileReplacements 설정 누락
+  - environment.development.ts를 직접 import
+  - apiUrl에서 /api 경로 중복/누락
+- **해결책**:
+  - angular.json에 fileReplacements 추가하여 개발/프로덕션 환경 자동 전환
+  - 모든 서비스에서 environment.ts만 import (자동으로 올바른 파일 선택)
+  - apiUrl을 `http://localhost:5069`로 설정하고 각 API 호출에서 `/api` 명시
+
+**4. 스트리밍 청크 수신 이슈 (진행 중 🔄)**
 - **문제**: 브라우저 콘솔에서 empty content로 청크 수신
 - **원인**: SignalR camelCase 직렬화는 정상 작동, Ollama 응답 생성 확인 필요
 - **상태**: 백엔드 로그 확인 필요
 
-**4. Ollama 응답 시간**
+**5. Ollama 응답 시간**
 - **문제**: qwen2.5:14b 모델이 120초 이상 소요
 - **원인**: 대형 모델 (9GB) + 전체 제품 컨텍스트
 - **해결책**:
@@ -254,7 +290,7 @@ npm run build
   - 타임아웃 증가: `appsettings.json` → `TimeoutSeconds: 300`
   - 컨텍스트 축소: 상위 3-5개 제품만 전송
 
-**5. 첫 요청 지연**
+**6. 첫 요청 지연**
 - **문제**: 모델 로딩 시간 2-3분
 - **해결책**: 서버 시작 후 웜업 요청 전송
 
@@ -311,9 +347,40 @@ npm run build
 
 ```typescript
 export const environment = {
+  production: false,
   apiUrl: 'http://localhost:5069',
-  signalRHubUrl: 'http://localhost:5069/hubs/chat'
+  signalRHubUrl: 'http://localhost:5069/hubs/chat',
+  appName: '자전거 쇼핑 챗봇',
+  defaultLanguage: 'ko',
+  chatConfig: {
+    maxMessageLength: 2000,
+    reconnectAttempts: 5,
+    typingIndicatorDelay: 500
+  }
 };
+```
+
+### angular.json 설정
+
+```json
+{
+  "configurations": {
+    "development": {
+      "optimization": false,
+      "extractLicenses": false,
+      "sourceMap": true,
+      "fileReplacements": [
+        {
+          "replace": "src/environments/environment.ts",
+          "with": "src/environments/environment.development.ts"
+        }
+      ]
+    }
+  },
+  "serve": {
+    "defaultConfiguration": "development"
+  }
+}
 ```
 
 ---
@@ -366,6 +433,8 @@ export const environment = {
 - [x] 사용자 등록/로그인/로그아웃
 - [x] 리프레시 토큰 관리
 - [x] 스트리밍 응답 (IAsyncEnumerable)
+- [x] 채팅 세션 관리 API (조회/삭제)
+- [x] 세션 히스토리 로드 기능
 
 ### 프론트엔드
 - [x] Angular 18 프로젝트 설정
@@ -379,9 +448,13 @@ export const environment = {
 - [x] 반응형 디자인
 - [x] Material Design 스타일링
 - [x] 로그인/회원가입 UI
-- [x] JWT 토큰 관리
+- [x] JWT 토큰 관리 (TokenService)
 - [x] Auth Guard (라우트 보호)
 - [x] 스트리밍 청크 수신 처리
+- [x] 세션 관리 UI (사이드바)
+- [x] 세션 검색 및 필터링
+- [x] 세션 전환 및 삭제
+- [x] 환경 설정 자동 전환 (개발/프로덕션)
 
 ---
 
@@ -397,12 +470,14 @@ export const environment = {
 ### 기능 추가
 - [x] 사용자 인증 시스템 (JWT)
 - [x] BCrypt 비밀번호 해싱
-- [ ] 대화 기록 저장 및 복원
-- [ ] 사용자별 채팅 세션 관리
+- [x] 대화 기록 저장 및 복원 (DB + localStorage)
+- [x] 사용자별 채팅 세션 관리 (세션 목록, 전환, 삭제)
+- [x] 세션 검색 및 필터링
 - [ ] 제품 이미지 표시
 - [ ] 다국어 지원
 - [ ] 음성 입력/출력
 - [ ] 파일 업로드 (제품 문의 이미지 등)
+- [ ] 세션 제목 자동 생성 (첫 메시지 기반)
 
 ### 보안 강화
 - [x] JWT 인증
@@ -461,6 +536,10 @@ export const environment = {
 12. ✅ BCrypt 비밀번호 보안
 13. ✅ 사용자 관리 시스템
 14. ✅ 역할 기반 권한 관리
+15. ✅ 채팅 세션 관리 (생성/조회/전환/삭제)
+16. ✅ 세션 검색 및 필터링
+17. ✅ 세션 히스토리 복원
+18. ✅ 환경 설정 자동화 (개발/프로덕션)
 
 ### 기술 스택
 - **백엔드**: ASP.NET Core 9.0, EF Core 9.0, SignalR, SQLite
@@ -510,23 +589,32 @@ export const environment = {
 
 **테스트**: http://localhost:4200 에서 바로 사용 가능!
 
-**최근 업데이트 (2026-01-05)**:
+**최근 업데이트 (2026-01-09)**:
+1. ✅ 채팅 세션 관리 API 구현 (조회/삭제)
+2. ✅ 세션 사이드바 UI 구현 (검색, 전환, 삭제)
+3. ✅ Angular 환경 설정 자동화 (fileReplacements)
+4. ✅ API 엔드포인트 경로 수정 (/api 명시)
+5. ✅ 세션 히스토리 복원 기능
+6. ✅ TokenService 분리 및 토큰 관리 개선
+7. 🔄 스트리밍 콘텐츠 누락 이슈 조사 중
+
+**이전 업데이트 (2026-01-05)**:
 1. ✅ JWT 인증 시스템 구현 및 DI 이슈 해결
 2. ✅ 사용자 등록 검증 규칙 통일 (3-100자)
 3. ✅ SignalR JWT 토큰 인증 지원
 4. ✅ 스트리밍 응답 청크 전송 구현
-5. 🔄 스트리밍 콘텐츠 누락 이슈 조사 중
 
 **다음 단계**:
 1. 스트리밍 청크 전송 이슈 해결 (Ollama 응답 확인)
-2. 사용자별 채팅 세션 관리 구현
+2. 세션 제목 자동 생성 (첫 메시지 기반)
 3. 프로덕션 환경 설정 (PostgreSQL, Redis 등)
 4. Rate Limiting 및 Input Validation 추가
 5. 모니터링 및 로깅 시스템 구축
+6. 제품 이미지 표시 기능
 
 ---
 
 **작성일**: 2026년 1월 5일
-**최종 수정**: 2026년 1월 5일
-**프로젝트 버전**: 1.1.0
-**상태**: ✅ 구현 완료 (JWT 인증 추가)
+**최종 수정**: 2026년 1월 9일
+**프로젝트 버전**: 1.2.0
+**상태**: ✅ 구현 완료 (세션 관리 기능 추가)
