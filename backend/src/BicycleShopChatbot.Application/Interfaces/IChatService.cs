@@ -22,4 +22,19 @@ public interface IChatService
         int? userId = null,
         string? userName = null,
         CancellationToken cancellationToken = default);
+
+    // Session management methods
+    Task<IEnumerable<ChatSessionDto>> GetUserSessionsAsync(
+        int userId,
+        CancellationToken cancellationToken = default);
+
+    Task<ChatSessionDto> LoadSessionHistoryAsync(
+        string sessionId,
+        int userId,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> DeleteSessionAsync(
+        string sessionId,
+        int userId,
+        CancellationToken cancellationToken = default);
 }

@@ -54,6 +54,16 @@ public class ChatService : IChatService
             request.UserName,
             cancellationToken);
 
+        // 첫 메시지인 경우 세션 제목 자동 생성
+        if (session.TotalMessages == 0 && string.IsNullOrEmpty(session.Title))
+        {
+            var title = request.Message.Length > 50
+                ? request.Message.Substring(0, 50) + "..."
+                : request.Message;
+            await _sessionRepository.UpdateSessionTitleAsync(session.Id, title, cancellationToken);
+            _logger.LogInformation("Auto-generated session title: {Title}", title);
+        }
+
         var userMessage = new ChatMessage
         {
             ChatSessionId = session.Id,
@@ -105,6 +115,12 @@ public class ChatService : IChatService
 
         await _sessionRepository.SaveChangesAsync(cancellationToken);
 
+        // 사용자의 세션이 30개를 초과하면 오래된 세션 자동 삭제
+        if (request.UserId.HasValue)
+        {
+            await _sessionRepository.DeleteOldUserSessionsAsync(request.UserId.Value, 30, cancellationToken);
+        }
+
         stopwatch.Stop();
         _logger.LogInformation("Processed message in {ElapsedMs}ms", stopwatch.ElapsedMilliseconds);
 
@@ -131,6 +147,16 @@ public class ChatService : IChatService
             request.UserId,
             request.UserName,
             cancellationToken);
+
+        // 첫 메시지인 경우 세션 제목 자동 생성
+        if (session.TotalMessages == 0 && string.IsNullOrEmpty(session.Title))
+        {
+            var title = request.Message.Length > 50
+                ? request.Message.Substring(0, 50) + "..."
+                : request.Message;
+            await _sessionRepository.UpdateSessionTitleAsync(session.Id, title, cancellationToken);
+            _logger.LogInformation("Auto-generated session title for streaming: {Title}", title);
+        }
 
         var userMessage = new ChatMessage
         {
@@ -203,6 +229,12 @@ public class ChatService : IChatService
         }
 
         await _sessionRepository.SaveChangesAsync(cancellationToken);
+
+        // 사용자의 세션이 30개를 초과하면 오래된 세션 자동 삭제
+        if (request.UserId.HasValue)
+        {
+            await _sessionRepository.DeleteOldUserSessionsAsync(request.UserId.Value, 30, cancellationToken);
+        }
 
         // 6. 완료 청크 전송
         yield return new ChatStreamChunk
@@ -347,5 +379,84 @@ public class ChatService : IChatService
     {
         var match = Regex.Match(message, @"\b([A-Z0-9]{6,})\b");
         return match.Success ? match.Value : null;
+    }
+
+    // Session management methods
+    public async Task<IEnumerable<ChatSessionDto>> GetUserSessionsAsync(
+        int userId,
+        CancellationToken cancellationToken = default)
+    {
+        var sessions = await _sessionRepository.GetUserSessionsAsync(userId, 30, cancellationToken);
+
+        return sessions.Select(s => new ChatSessionDto
+        {
+            Id = s.Id,
+            SessionId = s.SessionId,
+            UserId = s.UserId,
+            UserName = s.UserName,
+            Title = s.Title ?? "새 대화",
+            CreatedAt = s.CreatedAt,
+            LastActivityAt = s.LastActivityAt,
+            IsActive = s.IsActive,
+            TotalMessages = s.TotalMessages,
+            LastMessagePreview = s.Messages?.OrderByDescending(m => m.Timestamp)
+                .FirstOrDefault()?.Content?.Substring(0, Math.Min(100, s.Messages.FirstOrDefault()?.Content?.Length ?? 0))
+        });
+    }
+
+    public async Task<ChatSessionDto> LoadSessionHistoryAsync(
+        string sessionId,
+        int userId,
+        CancellationToken cancellationToken = default)
+    {
+        var session = await _sessionRepository.GetBySessionIdAsync(sessionId, cancellationToken);
+
+        if (session == null || session.UserId != userId)
+        {
+            throw new UnauthorizedAccessException("세션에 접근할 수 없습니다.");
+        }
+
+        var messages = await _messageRepository.GetMessagesBySessionIdAsync(session.Id, 100, cancellationToken);
+
+        return new ChatSessionDto
+        {
+            Id = session.Id,
+            SessionId = session.SessionId,
+            UserId = session.UserId,
+            UserName = session.UserName,
+            Title = session.Title,
+            CreatedAt = session.CreatedAt,
+            LastActivityAt = session.LastActivityAt,
+            IsActive = session.IsActive,
+            TotalMessages = session.TotalMessages,
+            RecentMessages = messages.Select(m => new ChatMessageDto
+            {
+                Id = m.Id,
+                SessionId = session.SessionId,
+                Role = m.Role.ToString(),
+                Content = m.Content,
+                Timestamp = m.Timestamp,
+                Category = m.Category?.ToString()
+            }).ToList()
+        };
+    }
+
+    public async Task<bool> DeleteSessionAsync(
+        string sessionId,
+        int userId,
+        CancellationToken cancellationToken = default)
+    {
+        var session = await _sessionRepository.GetBySessionIdAsync(sessionId, cancellationToken);
+
+        if (session == null || session.UserId != userId)
+        {
+            return false;
+        }
+
+        _sessionRepository.Remove(session);
+        await _sessionRepository.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Deleted session: {SessionId} for user: {UserId}", sessionId, userId);
+        return true;
     }
 }

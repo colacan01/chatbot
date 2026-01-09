@@ -1,0 +1,89 @@
+<div class="chat-sidebar" [class.collapsed]="isCollapsed">
+  <!-- 사이드바 헤더 -->
+  <div class="sidebar-header">
+    <button
+      class="new-chat-btn"
+      (click)="startNewChat()"
+      *ngIf="!isCollapsed"
+      title="새 대화 시작">
+      <span class="icon">+</span>
+      새 대화
+    </button>
+    <button
+      class="toggle-btn"
+      (click)="toggleSidebar()"
+      [title]="isCollapsed ? '사이드바 펼치기' : '사이드바 접기'">
+      {{ isCollapsed ? '›' : '‹' }}
+    </button>
+  </div>
+
+  <!-- 검색 영역 -->
+  <div class="search-box" *ngIf="!isCollapsed">
+    <div class="search-input-wrapper">
+      <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+      </svg>
+      <input
+        type="text"
+        class="search-input"
+        placeholder="대화 검색..."
+        [(ngModel)]="searchQuery"
+        (input)="onSearchChange()"
+      />
+      <button
+        class="clear-btn"
+        *ngIf="searchQuery"
+        (click)="clearSearch()"
+        title="검색어 지우기">
+        ×
+      </button>
+    </div>
+  </div>
+
+  <!-- 세션 목록 -->
+  <div class="session-list" *ngIf="!isCollapsed">
+    <!-- 로딩 상태 -->
+    <div class="loading-state" *ngIf="isLoading">
+      <div class="spinner"></div>
+      <p>대화 목록 불러오는 중...</p>
+    </div>
+
+    <!-- 세션 목록 -->
+    <div
+      *ngFor="let session of filteredSessions"
+      class="session-item"
+      [class.active]="session.sessionId === currentSessionId"
+      (click)="selectSession(session.sessionId)"
+      [title]="getSessionTitle(session)">
+
+      <div class="session-info">
+        <div class="session-title">
+          {{ getSessionTitle(session) }}
+        </div>
+        <div class="session-date">
+          {{ formatDate(session.lastActivityAt) }}
+        </div>
+      </div>
+
+      <button
+        class="delete-btn"
+        (click)="deleteSession(session.sessionId, $event)"
+        title="대화 삭제"
+        *ngIf="session.sessionId !== currentSessionId">
+        ×
+      </button>
+    </div>
+
+    <!-- 검색 결과 없음 -->
+    <div class="empty-state" *ngIf="!isLoading && searchQuery && filteredSessions.length === 0">
+      <p>검색 결과가 없습니다.</p>
+      <p class="hint">"{{ searchQuery }}"에 대한 대화를 찾을 수 없습니다.</p>
+    </div>
+
+    <!-- 빈 상태 -->
+    <div class="empty-state" *ngIf="!isLoading && !searchQuery && sessions.length === 0">
+      <p>아직 대화 기록이 없습니다.</p>
+      <p class="hint">새 대화를 시작해보세요!</p>
+    </div>
+  </div>
+</div>

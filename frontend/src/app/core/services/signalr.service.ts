@@ -12,10 +12,14 @@ export class SignalRService {
   private messageSubject = new Subject<ChatMessage>();
   private messageChunkSubject = new Subject<ChatStreamChunk>();
   private connectionStateSubject = new Subject<signalR.HubConnectionState>();
+  private sessionHistoryLoadedSubject = new Subject<any>();
+  private errorSubject = new Subject<string>();
 
   public messages$ = this.messageSubject.asObservable();
   public messageChunks$ = this.messageChunkSubject.asObservable();
   public connectionState$ = this.connectionStateSubject.asObservable();
+  public sessionHistoryLoaded$ = this.sessionHistoryLoadedSubject.asObservable();
+  public error$ = this.errorSubject.asObservable();
 
   constructor(
     private ngZone: NgZone,
@@ -139,6 +143,27 @@ export class SignalRService {
   }
 
   /**
+   * 세션 히스토리를 로드합니다 (SignalR)
+   * @param sessionId 세션 ID
+   */
+  public loadSessionHistory(sessionId: string): Promise<void> {
+    if (!this.hubConnection) {
+      return Promise.reject('SignalR 연결이 없습니다.');
+    }
+
+    console.log('📜 세션 히스토리 로드 요청:', sessionId);
+
+    return this.hubConnection.invoke('LoadSessionHistory', sessionId)
+      .then(() => {
+        console.log('✅ 세션 히스토리 로드 요청 전송 완료');
+      })
+      .catch(err => {
+        console.error('❌ 세션 히스토리 로드 실패:', err);
+        throw err;
+      });
+  }
+
+  /**
    * 현재 연결 상태를 반환합니다
    */
   public getConnectionState(): signalR.HubConnectionState | undefined {
@@ -211,6 +236,22 @@ export class SignalRService {
     this.hubConnection.on('StreamCancelled', (sessionId: string) => {
       this.ngZone.run(() => {
         console.warn('⚠️ 스트리밍 취소:', sessionId);
+      });
+    });
+
+    // 세션 히스토리 로드 완료 핸들러
+    this.hubConnection.on('SessionHistoryLoaded', (sessionDto: any) => {
+      this.ngZone.run(() => {
+        console.log('📜 세션 히스토리 로드 완료:', sessionDto);
+        this.sessionHistoryLoadedSubject.next(sessionDto);
+      });
+    });
+
+    // 에러 핸들러
+    this.hubConnection.on('Error', (errorMessage: string) => {
+      this.ngZone.run(() => {
+        console.error('❌ SignalR 에러:', errorMessage);
+        this.errorSubject.next(errorMessage);
       });
     });
   }

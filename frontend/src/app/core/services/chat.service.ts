@@ -1,9 +1,12 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, Observable } from 'rxjs';
 import * as signalR from '@microsoft/signalr';
 import { SignalRService } from './signalr.service';
+import { AuthService } from './auth.service';
 import { ChatMessage, SendMessageRequest, MessageRole, ChatStreamChunk } from '../models/chat-message.model';
 import { ChatSession } from '../models/chat-session.model';
+import { environment } from '../../../environments/environment';
 
 @Injectable({
   providedIn: 'root'
@@ -25,7 +28,14 @@ export class ChatService {
   // 스트리밍 상태 관리
   private streamingMessages = new Map<string, ChatMessage>();
 
-  constructor(private signalRService: SignalRService) {
+  // localStorage 키
+  private readonly LAST_SESSION_KEY = 'last_session_id';
+
+  constructor(
+    private signalRService: SignalRService,
+    private http: HttpClient,
+    private authService: AuthService
+  ) {
     // SignalR 메시지 구독
     this.signalRService.messages$.subscribe(message => {
       console.log('🔔 ChatService에서 메시지 수신:', message);
@@ -45,6 +55,44 @@ export class ChatService {
       console.log('🔌 연결 상태 변경:', isConnected);
       this.isConnectedSubject.next(isConnected);
     });
+
+    // SignalR 세션 히스토리 로드 이벤트 구독
+    this.signalRService.sessionHistoryLoaded$.subscribe(sessionDto => {
+      if (sessionDto && sessionDto.recentMessages) {
+        console.log('📜 세션 히스토리 복원:', sessionDto.recentMessages.length, '개 메시지');
+
+        // 메시지 복원
+        const messages: ChatMessage[] = sessionDto.recentMessages.map((msg: any) => ({
+          messageId: msg.id?.toString(),
+          sessionId: sessionDto.sessionId,
+          role: msg.role,
+          content: msg.content,
+          timestamp: new Date(msg.timestamp),
+          category: msg.category
+        }));
+        this.messagesSubject.next(messages);
+
+        // 세션 정보 업데이트
+        const session: ChatSession = {
+          sessionId: sessionDto.sessionId,
+          userId: sessionDto.userId,
+          userName: sessionDto.userName,
+          title: sessionDto.title,
+          createdAt: new Date(sessionDto.createdAt),
+          lastActivityAt: new Date(sessionDto.lastActivityAt),
+          isActive: sessionDto.isActive,
+          totalMessages: sessionDto.totalMessages,
+          messages: messages
+        };
+        this.sessionSubject.next(session);
+      }
+    });
+
+    // SignalR 에러 이벤트 구독
+    this.signalRService.error$.subscribe(error => {
+      console.error('❌ SignalR 에러:', error);
+      // 에러 메시지를 UI에 표시할 수 있도록 처리
+    });
   }
 
   /**
@@ -55,27 +103,38 @@ export class ChatService {
    */
   public async initialize(hubUrl: string, userId?: number, userName?: string): Promise<void> {
     this.hubUrl = hubUrl;
-    this.sessionId = this.generateSessionId();
-
-    // 세션 정보 설정
-    const session: ChatSession = {
-      sessionId: this.sessionId,
-      userId: userId,
-      userName: userName,
-      createdAt: new Date(),
-      lastActivityAt: new Date(),
-      isActive: true,
-      totalMessages: 0,
-      messages: []
-    };
-    this.sessionSubject.next(session);
 
     try {
       // SignalR 연결 시작
       await this.signalRService.startConnection(hubUrl);
 
-      // 세션 참여
-      await this.signalRService.joinSession(this.sessionId);
+      // 마지막 세션 복원 시도
+      const lastSessionId = this.getLastSessionId();
+
+      if (lastSessionId && userId) {
+        console.log('🔄 마지막 세션 복원 시도:', lastSessionId);
+
+        try {
+          // 기존 세션 복원
+          this.sessionId = lastSessionId;
+
+          // 세션 참여
+          await this.signalRService.joinSession(this.sessionId);
+
+          // SignalR로 세션 히스토리 로드 요청
+          await this.signalRService.loadSessionHistory(lastSessionId);
+
+          console.log('✅ 마지막 세션 복원 완료:', lastSessionId);
+        } catch (error) {
+          console.warn('⚠️ 세션 복원 실패, 새 세션 시작:', error);
+          // 복원 실패 시 새 세션 시작
+          await this.startNewSessionInternal(userId, userName);
+        }
+      } else {
+        // 마지막 세션이 없으면 새 세션 시작
+        console.log('🆕 새 세션 시작 (마지막 세션 없음)');
+        await this.startNewSessionInternal(userId, userName);
+      }
 
       this.isConnectedSubject.next(true);
 
@@ -85,6 +144,31 @@ export class ChatService {
       this.isConnectedSubject.next(false);
       throw error;
     }
+  }
+
+  /**
+   * 새 세션을 시작합니다 (내부 메서드)
+   */
+  private async startNewSessionInternal(userId?: number, userName?: string): Promise<void> {
+    const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    this.sessionId = newSessionId;
+
+    // localStorage에 마지막 세션 저장
+    localStorage.setItem(this.LAST_SESSION_KEY, newSessionId);
+
+    const session: ChatSession = {
+      sessionId: newSessionId,
+      userId: userId,
+      userName: userName,
+      createdAt: new Date(),
+      lastActivityAt: new Date(),
+      isActive: true,
+      totalMessages: 0,
+      messages: []
+    };
+
+    this.sessionSubject.next(session);
+    await this.signalRService.joinSession(newSessionId);
   }
 
   /**
@@ -309,5 +393,105 @@ export class ChatService {
       session.lastActivityAt = new Date();
       this.sessionSubject.next(session);
     }
+  }
+
+  // ===== 세션 관리 메서드 =====
+
+  /**
+   * 사용자의 세션 목록을 조회합니다 (최근 30개)
+   */
+  public getUserSessions(): Observable<ChatSession[]> {
+    return this.http.get<ChatSession[]>(`${environment.apiUrl}/api/chat/sessions`);
+  }
+
+  /**
+   * 특정 세션의 히스토리를 로드합니다 (HTTP)
+   */
+  public loadSessionHistory(sessionId: string): Observable<ChatSession> {
+    return this.http.get<ChatSession>(`${environment.apiUrl}/api/chat/sessions/${sessionId}`);
+  }
+
+  /**
+   * 세션을 삭제합니다
+   */
+  public deleteSession(sessionId: string): Observable<void> {
+    return this.http.delete<void>(`${environment.apiUrl}/api/chat/sessions/${sessionId}`);
+  }
+
+  /**
+   * 세션을 전환합니다
+   */
+  public switchSession(sessionId: string): void {
+    console.log('🔄 세션 전환:', sessionId);
+
+    // 메시지 초기화
+    this.clearMessages();
+    this.sessionId = sessionId;
+
+    // localStorage에 마지막 세션 저장
+    localStorage.setItem(this.LAST_SESSION_KEY, sessionId);
+
+    // SignalR로 세션 히스토리 로드 요청
+    this.signalRService.loadSessionHistory(sessionId);
+
+    // 현재 세션 업데이트
+    const user = this.authService.getCurrentUserValue();
+    const session: ChatSession = {
+      sessionId,
+      userId: user?.id,
+      userName: user?.userName || '',
+      createdAt: new Date(),
+      lastActivityAt: new Date(),
+      isActive: true,
+      totalMessages: 0,
+      messages: []
+    };
+
+    this.sessionSubject.next(session);
+  }
+
+  /**
+   * 새로운 세션을 시작합니다
+   */
+  public startNewSession(): void {
+    const user = this.authService.getCurrentUserValue();
+    const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    console.log('🆕 새 세션 시작:', newSessionId);
+
+    // 메시지 초기화
+    this.clearMessages();
+    this.sessionId = newSessionId;
+
+    // localStorage에 마지막 세션 저장
+    localStorage.setItem(this.LAST_SESSION_KEY, newSessionId);
+
+    const session: ChatSession = {
+      sessionId: newSessionId,
+      userId: user?.id,
+      userName: user?.userName || '',
+      createdAt: new Date(),
+      lastActivityAt: new Date(),
+      isActive: true,
+      totalMessages: 0,
+      messages: []
+    };
+
+    this.sessionSubject.next(session);
+    this.signalRService.joinSession(newSessionId);
+  }
+
+  /**
+   * 마지막 세션 ID를 가져옵니다
+   */
+  public getLastSessionId(): string | null {
+    return localStorage.getItem(this.LAST_SESSION_KEY);
+  }
+
+  /**
+   * 현재 세션을 반환합니다
+   */
+  public get currentSession$(): Observable<ChatSession | null> {
+    return this.sessionSubject.asObservable();
   }
 }

@@ -4,6 +4,7 @@ export interface ChatSession {
   sessionId: string;
   userId?: number;
   userName?: string;
+  title?: string;
   createdAt: Date;
   lastActivityAt: Date;
   isActive: boolean;

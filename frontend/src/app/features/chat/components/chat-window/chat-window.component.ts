@@ -6,12 +6,13 @@ import { AuthService } from '../../../../core/services/auth.service';
 import { ChatMessage } from '../../../../core/models/chat-message.model';
 import { MessageListComponent } from '../message-list/message-list.component';
 import { ChatInputComponent } from '../chat-input/chat-input.component';
-import { environment } from '../../../../../environments/environment.development';
+import { ChatSidebarComponent } from '../chat-sidebar/chat-sidebar.component';
+import { environment } from '../../../../../environments/environment';
 
 @Component({
   selector: 'app-chat-window',
   standalone: true,
-  imports: [CommonModule, MessageListComponent, ChatInputComponent],
+  imports: [CommonModule, MessageListComponent, ChatInputComponent, ChatSidebarComponent],
   templateUrl: './chat-window.component.html',
   styleUrls: ['./chat-window.component.scss']
 })

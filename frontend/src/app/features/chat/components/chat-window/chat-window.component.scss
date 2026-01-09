@@ -1,8 +1,16 @@
-.chat-window {
+// 컨테이너: 사이드바 + 채팅창
+.chat-container {
+  display: flex;
   height: 100vh;
+  overflow: hidden;
+}
+
+.chat-window {
+  flex: 1;
   display: flex;
   flex-direction: column;
   background-color: #fafafa;
+  min-width: 0; // flex item이 축소될 수 있도록
 }
 
 /* 헤더 */

@@ -6,6 +6,7 @@ public class ChatSession
     public string SessionId { get; set; } = string.Empty;
     public int? UserId { get; set; }
     public string? UserName { get; set; }
+    public string? Title { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime LastActivityAt { get; set; }
     public bool IsActive { get; set; }

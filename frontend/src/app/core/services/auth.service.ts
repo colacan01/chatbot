@@ -3,14 +3,14 @@ import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, Observable, tap } from 'rxjs';
 import { Router } from '@angular/router';
 import { TokenService } from './token.service';
-import { 
-  LoginRequest, 
-  RegisterRequest, 
-  AuthResponse, 
+import {
+  LoginRequest,
+  RegisterRequest,
+  AuthResponse,
   User,
-  RefreshTokenRequest 
+  RefreshTokenRequest
 } from '../models/user.model';
-import { environment } from '../../../environments/environment.development';
+import { environment } from '../../../environments/environment';
 
 @Injectable({
   providedIn: 'root'
@@ -45,22 +45,22 @@ export class AuthService {
   }
 
   register(request: RegisterRequest): Observable<AuthResponse> {
-    return this.http.post<AuthResponse>(`${this.apiUrl}/auth/register`, request).pipe(
+    return this.http.post<AuthResponse>(`${this.apiUrl}/api/auth/register`, request).pipe(
       tap(response => this.handleAuthResponse(response))
     );
   }
 
   login(request: LoginRequest): Observable<AuthResponse> {
-    return this.http.post<AuthResponse>(`${this.apiUrl}/auth/login`, request).pipe(
+    return this.http.post<AuthResponse>(`${this.apiUrl}/api/auth/login`, request).pipe(
       tap(response => this.handleAuthResponse(response))
     );
   }
 
   logout(): void {
     const token = this.tokenService.getAccessToken();
-    
+
     if (token) {
-      this.http.post(`${this.apiUrl}/auth/logout`, {}).subscribe({
+      this.http.post(`${this.apiUrl}/api/auth/logout`, {}).subscribe({
         next: () => {
           this.clearAuthState();
         },
@@ -87,13 +87,13 @@ export class AuthService {
       refreshToken
     };
 
-    return this.http.post<AuthResponse>(`${this.apiUrl}/auth/refresh`, request).pipe(
+    return this.http.post<AuthResponse>(`${this.apiUrl}/api/auth/refresh`, request).pipe(
       tap(response => this.handleAuthResponse(response))
     );
   }
 
   getCurrentUser(): Observable<User> {
-    return this.http.get<User>(`${this.apiUrl}/auth/me`).pipe(
+    return this.http.get<User>(`${this.apiUrl}/api/auth/me`).pipe(
       tap(user => {
         this.currentUserSubject.next(user);
         this.tokenService.setUserData(user);
@@ -103,6 +103,10 @@ export class AuthService {
 
   isAuthenticated(): boolean {
     return this.isAuthenticatedSubject.value;
+  }
+
+  getCurrentUserValue(): User | null {
+    return this.currentUserSubject.value;
   }
 
   getAccessToken(): string | null {

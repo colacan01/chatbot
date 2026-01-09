@@ -1,9 +1,12 @@
+using System.Security.Claims;
 using BicycleShopChatbot.Application.DTOs;
 using BicycleShopChatbot.Application.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 
 namespace BicycleShopChatbot.Api.Hubs;
 
+[Authorize]
 public class ChatHub : Hub
 {
     private readonly IChatService _chatService;
@@ -19,8 +22,24 @@ public class ChatHub : Hub
     {
         try
         {
+            // 인증된 사용자 ID 추출 및 강제 설정
+            var userIdClaim = Context.User?.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out var authenticatedUserId))
+            {
+                _logger.LogWarning("Unauthorized access attempt to SendMessage");
+                await Clients.Caller.SendAsync("Error", "로그인이 필요합니다.");
+                return;
+            }
+
+            // 요청의 UserId를 인증된 사용자로 강제 설정
+            request.UserId = authenticatedUserId;
+
+            var userNameClaim = Context.User?.FindFirst(ClaimTypes.Name);
+            request.UserName = userNameClaim?.Value ?? "사용자";
+
             _logger.LogInformation(
-                "Received message from session {SessionId}: {Message}",
+                "Received message from user {UserId} in session {SessionId}: {Message}",
+                authenticatedUserId,
                 request.SessionId,
                 request.Message.Substring(0, Math.Min(50, request.Message.Length)));
 
@@ -39,8 +58,24 @@ public class ChatHub : Hub
     {
         try
         {
+            // 인증된 사용자 ID 추출 및 강제 설정
+            var userIdClaim = Context.User?.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out var authenticatedUserId))
+            {
+                _logger.LogWarning("Unauthorized access attempt to SendMessageStream");
+                await Clients.Caller.SendAsync("Error", "로그인이 필요합니다.");
+                return;
+            }
+
+            // 요청의 UserId를 인증된 사용자로 강제 설정
+            request.UserId = authenticatedUserId;
+
+            var userNameClaim = Context.User?.FindFirst(ClaimTypes.Name);
+            request.UserName = userNameClaim?.Value ?? "사용자";
+
             _logger.LogInformation(
-                "Streaming message from session {SessionId}: {Message}",
+                "Streaming message from user {UserId} in session {SessionId}: {Message}",
+                authenticatedUserId,
                 request.SessionId,
                 request.Message.Substring(0, Math.Min(50, request.Message.Length)));
 
@@ -80,6 +115,44 @@ public class ChatHub : Hub
             "Client {ConnectionId} left session {SessionId}",
             Context.ConnectionId,
             sessionId);
+    }
+
+    public async Task LoadSessionHistory(string sessionId)
+    {
+        try
+        {
+            // 인증된 사용자 ID 추출
+            var userIdClaim = Context.User?.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out var userId))
+            {
+                _logger.LogWarning("Unauthorized access attempt to LoadSessionHistory");
+                await Clients.Caller.SendAsync("Error", "로그인이 필요합니다.");
+                return;
+            }
+
+            _logger.LogInformation(
+                "Loading session history for user {UserId}, session {SessionId}",
+                userId,
+                sessionId);
+
+            var sessionDto = await _chatService.LoadSessionHistoryAsync(sessionId, userId);
+            await Clients.Caller.SendAsync("SessionHistoryLoaded", sessionDto);
+
+            _logger.LogInformation(
+                "Session history loaded successfully: {SessionId}, {MessageCount} messages",
+                sessionId,
+                sessionDto.RecentMessages.Count);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Unauthorized access to session {SessionId}", sessionId);
+            await Clients.Caller.SendAsync("Error", "세션에 접근할 수 없습니다.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error loading session history for {SessionId}", sessionId);
+            await Clients.Caller.SendAsync("Error", "세션 히스토리 로드 중 오류가 발생했습니다.");
+        }
     }
 
     public override async Task OnConnectedAsync()
