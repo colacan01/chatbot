@@ -107,6 +107,6 @@ backend/src/BicycleShopChatbot.Api/bin/Debug/net9.0/appsettings.Development.json
 backend/src/BicycleShopChatbot.Api/bin/Debug/net9.0/appsettings.json
 
 # scripts
+../scripts/
 ../scripts/VectorDataLoader/
 scripts/VectorDataLoader/
-../scripts/
