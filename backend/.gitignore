@@ -13,6 +13,7 @@ bld/
 [Bb]ld/
 [Ll]og/
 [Ll]ogs/
+[Tt]ools/
 
 # Visual Studio
 .vs/
@@ -104,3 +105,8 @@ yarn-error.log*
 lerna-debug.log*
 backend/src/BicycleShopChatbot.Api/bin/Debug/net9.0/appsettings.Development.json
 backend/src/BicycleShopChatbot.Api/bin/Debug/net9.0/appsettings.json
+
+# scripts
+../scripts/VectorDataLoader/
+scripts/VectorDataLoader/
+../scripts/

@@ -411,7 +411,27 @@ public class ChatService : IChatService
     {
         var session = await _sessionRepository.GetBySessionIdAsync(sessionId, cancellationToken);
 
-        if (session == null || session.UserId != userId)
+        // 세션이 없으면 새 세션 정보 반환 (에러 대신)
+        if (session == null)
+        {
+            _logger.LogInformation("Session {SessionId} not found, returning empty session for user {UserId}", sessionId, userId);
+            return new ChatSessionDto
+            {
+                Id = Guid.NewGuid(),
+                SessionId = sessionId,
+                UserId = userId,
+                UserName = null,
+                Title = null,
+                CreatedAt = DateTime.UtcNow,
+                LastActivityAt = DateTime.UtcNow,
+                IsActive = true,
+                TotalMessages = 0,
+                RecentMessages = new List<ChatMessageDto>()
+            };
+        }
+
+        // 세션 소유자가 다르면 접근 거부
+        if (session.UserId != userId)
         {
             throw new UnauthorizedAccessException("세션에 접근할 수 없습니다.");
         }

@@ -21,7 +21,10 @@ builder.Services.AddOpenApi();
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
-    options.UseSqlite(connectionString ?? "Data Source=bicycleshop.db");
+    options.UseNpgsql(connectionString, npgsqlOptions =>
+    {
+        npgsqlOptions.UseVector();
+    });
 });
 
 builder.Services.AddCors(options =>
@@ -110,6 +113,7 @@ builder.Services.AddSignalR();
 builder.Services.AddScoped<IRepository<ChatSession>, Repository<ChatSession>>();
 builder.Services.AddScoped<IRepository<ChatMessage>, Repository<ChatMessage>>();
 builder.Services.AddScoped<IRepository<Product>, Repository<Product>>();
+builder.Services.AddScoped<IRepository<ProductEmbedding>, Repository<ProductEmbedding>>();
 builder.Services.AddScoped<IRepository<Order>, Repository<Order>>();
 builder.Services.AddScoped<IRepository<FAQ>, Repository<FAQ>>();
 builder.Services.AddScoped<IRepository<User>, Repository<User>>();
@@ -117,6 +121,7 @@ builder.Services.AddScoped<IRepository<User>, Repository<User>>();
 builder.Services.AddScoped<IChatSessionRepository, ChatSessionRepository>();
 builder.Services.AddScoped<IChatMessageRepository, ChatMessageRepository>();
 builder.Services.AddScoped<IProductRepository, ProductRepository>();
+builder.Services.AddScoped<IVectorProductRepository, VectorProductRepository>();
 builder.Services.AddScoped<IOrderRepository, OrderRepository>();
 builder.Services.AddScoped<IFAQRepository, FAQRepository>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
@@ -128,6 +133,23 @@ builder.Services.AddScoped<IProductContextService, ProductContextService>();
 builder.Services.AddScoped<IOrderContextService, OrderContextService>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IPasswordHasher, BCryptPasswordHasher>();
+
+// Embedding service with dedicated HttpClient
+builder.Services.AddHttpClient<IEmbeddingService, EmbeddingService>()
+    .ConfigurePrimaryHttpMessageHandler(() =>
+    {
+        return new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+            MaxConnectionsPerServer = 10,
+            KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+            KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
+            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
+            ConnectTimeout = TimeSpan.FromSeconds(30)
+        };
+    })
+    .SetHandlerLifetime(TimeSpan.FromMinutes(30));
 
 builder.Services.AddHttpClient<IOllamaService, OllamaService>()
     .ConfigurePrimaryHttpMessageHandler(() =>

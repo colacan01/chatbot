@@ -19,18 +19,10 @@ public class DatabaseSeeder
     {
         try
         {
-            // Ensure database is created
-            await _context.Database.EnsureCreatedAsync();
+            _logger.LogInformation("Starting database seeding...");
 
-            // Seed Products
-            if (!await _context.Products.AnyAsync())
-            {
-                _logger.LogInformation("Seeding products...");
-                var products = ProductSeedData.GetSeedProducts();
-                await _context.Products.AddRangeAsync(products);
-                await _context.SaveChangesAsync();
-                _logger.LogInformation("Seeded {Count} products", products.Count);
-            }
+            // Product table - using existing product_embeddings table from VectorDataLoader
+            _logger.LogInformation("Product data is available in existing product_embeddings table");
 
             // Seed FAQs
             if (!await _context.FAQs.AnyAsync())
@@ -39,17 +31,25 @@ public class DatabaseSeeder
                 var faqs = FaqSeedData.GetSeedFaqs();
                 await _context.FAQs.AddRangeAsync(faqs);
                 await _context.SaveChangesAsync();
-                _logger.LogInformation("Seeded {Count} FAQs", faqs.Count);
+                _logger.LogInformation($"Seeded {faqs.Count} FAQs");
+            }
+            else
+            {
+                _logger.LogInformation("FAQs already exist, skipping seed");
             }
 
             // Seed Orders
             if (!await _context.Orders.AnyAsync())
             {
-                _logger.LogInformation("Seeding orders...");
+                _logger.LogInformation("Seeding Orders...");
                 var orders = OrderSeedData.GetSeedOrders();
                 await _context.Orders.AddRangeAsync(orders);
                 await _context.SaveChangesAsync();
-                _logger.LogInformation("Seeded {Count} orders", orders.Count);
+                _logger.LogInformation($"Seeded {orders.Count} Orders");
+            }
+            else
+            {
+                _logger.LogInformation("Orders already exist, skipping seed");
             }
 
             _logger.LogInformation("Database seeding completed successfully");
