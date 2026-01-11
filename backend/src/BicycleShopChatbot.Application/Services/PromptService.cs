@@ -106,32 +106,50 @@ public class PromptService : IPromptService
     {
         var lower = userMessage.ToLower();
 
+        // 주문/배송 관련 (가장 구체적 - 최우선)
         if (lower.Contains("주문") || lower.Contains("배송") ||
-            lower.Contains("송장") || lower.Contains("언제") && (lower.Contains("도착") || lower.Contains("배달")))
+            lower.Contains("송장") || lower.Contains("운송장") ||
+            lower.Contains("택배") ||
+            (lower.Contains("언제") && (lower.Contains("도착") || lower.Contains("배달"))))
         {
             return ChatCategory.OrderStatus;
         }
 
-        if (lower.Contains("추천") || lower.Contains("찾") ||
-            lower.Contains("어떤") || lower.Contains("자전거") ||
-            lower.Contains("얼마") && lower.Contains("?"))
-        {
-            return ChatCategory.ProductSearch;
-        }
-
+        // FAQ 관련 (두 번째 우선순위)
         if (lower.Contains("환불") || lower.Contains("교환") ||
             lower.Contains("반품") || lower.Contains("정책") ||
-            lower.Contains("as") || lower.Contains("보증") ||
-            lower.Contains("취소"))
+            lower.Contains("as") || lower.Contains("a/s") ||
+            lower.Contains("보증") || lower.Contains("취소") ||
+            lower.Contains("조립") || lower.Contains("서비스"))
         {
             return ChatCategory.FAQ;
         }
 
+        // 제품 상세 스펙 (ProductSearch보다 우선)
         if (lower.Contains("스펙") || lower.Contains("사양") ||
             lower.Contains("무게") || lower.Contains("크기") ||
-            lower.Contains("재질"))
+            lower.Contains("재질") || lower.Contains("프레임") ||
+            lower.Contains("변속") || lower.Contains("기어"))
         {
             return ChatCategory.ProductDetails;
+        }
+
+        // 제품 검색/추천 (가장 포괄적 - 많은 케이스 커버)
+        if (lower.Contains("추천") || lower.Contains("찾") ||
+            lower.Contains("검색") || lower.Contains("구매") ||
+            lower.Contains("살") || lower.Contains("구입") ||
+            lower.Contains("어떤") || lower.Contains("어느") ||
+            lower.Contains("가격") || lower.Contains("얼마") ||
+            lower.Contains("재고") || lower.Contains("있나") ||
+            lower.Contains("있어") || lower.Contains("판매") ||
+            lower.Contains("자전거") || lower.Contains("바이크") ||
+            lower.Contains("로드") || lower.Contains("산악") ||
+            lower.Contains("mtb") || lower.Contains("하이브리드") ||
+            lower.Contains("출퇴근") || lower.Contains("레저") ||
+            lower.Contains("예산") || lower.Contains("만원") ||
+            lower.Contains("원대") || lower.Contains("원 이하"))
+        {
+            return ChatCategory.ProductSearch;
         }
 
         return ChatCategory.General;

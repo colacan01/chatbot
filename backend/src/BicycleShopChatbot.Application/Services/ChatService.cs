@@ -329,6 +329,7 @@ public class ChatService : IChatService
         return intent switch
         {
             ChatCategory.ProductSearch => await BuildProductSearchPromptAsync(userMessage, cancellationToken),
+            ChatCategory.ProductDetails => await BuildProductSearchPromptAsync(userMessage, cancellationToken),
             ChatCategory.OrderStatus => await BuildOrderStatusPromptAsync(userMessage, cancellationToken),
             ChatCategory.FAQ => await BuildFaqPromptAsync(userMessage, cancellationToken),
             _ => _promptService.GetSystemPrompt(intent)
@@ -344,8 +345,20 @@ public class ChatService : IChatService
             5,
             cancellationToken);
 
-        if (!products.Any())
+        _logger.LogInformation(
+            "Vector search for '{Query}' returned {Count} products",
+            userMessage.Length > 50 ? userMessage.Substring(0, 50) + "..." : userMessage,
+            products.Count);
+
+        if (products.Any())
         {
+            _logger.LogInformation(
+                "Top products: {Products}",
+                string.Join(", ", products.Take(3).Select(p => p.NameKorean)));
+        }
+        else
+        {
+            _logger.LogWarning("No products found via vector search, using default product list");
             products = await _productContextService.SearchProductsAsync("", 5, cancellationToken);
         }
 
