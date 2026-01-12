@@ -84,12 +84,16 @@ public class ChatService : IChatService
         _logger.LogInformation("Detected intent: {Intent} for message: {Message}",
             intent, request.Message.Substring(0, Math.Min(50, request.Message.Length)));
 
+        var temperature = _promptService.GetTemperatureForCategory(intent);
+        _logger.LogInformation("Using temperature {Temperature} for category {Category}", temperature, intent);
+
         var systemPrompt = await BuildContextualPromptAsync(intent, request.Message, cancellationToken);
 
         var aiResponse = await _ollamaService.GenerateResponseAsync(
             request.Message,
             conversationHistory,
             systemPrompt,
+            temperature,
             cancellationToken);
 
         var assistantMessage = new ChatMessage
@@ -178,6 +182,9 @@ public class ChatService : IChatService
         var intent = _promptService.DetectIntent(request.Message);
         _logger.LogInformation("Detected intent: {Intent} for streaming message", intent);
 
+        var temperature = _promptService.GetTemperatureForCategory(intent);
+        _logger.LogInformation("Using temperature {Temperature} for category {Category}", temperature, intent);
+
         var systemPrompt = await BuildContextualPromptAsync(intent, request.Message, cancellationToken);
 
         // 3. 스트리밍 시작
@@ -188,6 +195,7 @@ public class ChatService : IChatService
             request.Message,
             conversationHistory,
             systemPrompt,
+            temperature,
             cancellationToken))
         {
             fullContent.Append(chunk);
@@ -340,7 +348,67 @@ public class ChatService : IChatService
         string userMessage,
         CancellationToken cancellationToken)
     {
-        var products = await _productContextService.SearchProductsAsync(
+        // Step 1: Extract ALL filters from user message
+        var productName = _promptService.ExtractProductName(userMessage);
+        var (minPrice, maxPrice) = _promptService.ExtractPriceRange(userMessage);
+        var category = _promptService.ExtractProductCategory(userMessage);
+
+        // Step 2: Determine if ANY filters are present
+        bool hasProductName = !string.IsNullOrEmpty(productName);
+        bool hasPriceFilter = minPrice.HasValue || maxPrice.HasValue;
+        bool hasCategoryFilter = !string.IsNullOrEmpty(category);
+        bool hasAnyFilter = hasProductName || hasPriceFilter || hasCategoryFilter;
+
+        List<Product> products;
+
+        // Step 3: Apply filters
+        if (hasAnyFilter)
+        {
+            // Log extracted filters
+            var filterDescription = new List<string>();
+            if (hasProductName) filterDescription.Add($"Product: {productName}");
+            if (hasPriceFilter) filterDescription.Add($"Price: {minPrice?.ToString("N0") ?? "min"}~{maxPrice?.ToString("N0") ?? "max"}");
+            if (hasCategoryFilter) filterDescription.Add($"Category: {category}");
+
+            _logger.LogInformation(
+                "Applying combined filters: {Filters}",
+                string.Join(", ", filterDescription));
+
+            // Apply combined filter search
+            products = await _productContextService.SearchWithFiltersAsync(
+                minPrice,
+                maxPrice,
+                category,
+                productName,
+                cancellationToken);
+
+            _logger.LogInformation(
+                "Combined filter search returned {Count} products",
+                products.Count);
+
+            if (products.Any())
+            {
+                _logger.LogInformation(
+                    "Top products: {Products}",
+                    string.Join(", ", products.Take(3).Select(p => p.NameKorean)));
+
+                return _promptService.GetProductSearchPrompt(userMessage, products);
+            }
+            else
+            {
+                // No products match the combined filters
+                _logger.LogWarning(
+                    "No products found matching filters: {Filters}",
+                    string.Join(", ", filterDescription));
+
+                return _promptService.GetNoProductsFoundPrompt(userMessage);
+            }
+        }
+
+        // Step 4: No filters detected, use vector search
+        _logger.LogInformation("No specific filters requested, using vector search");
+
+        products = await _productContextService.SearchProductsAsync(
             userMessage,
             5,
             cancellationToken);
@@ -355,14 +423,13 @@ public class ChatService : IChatService
             _logger.LogInformation(
                 "Top products: {Products}",
                 string.Join(", ", products.Take(3).Select(p => p.NameKorean)));
-        }
-        else
-        {
-            _logger.LogWarning("No products found via vector search, using default product list");
-            products = await _productContextService.SearchProductsAsync("", 5, cancellationToken);
+
+            return _promptService.GetProductSearchPrompt(userMessage, products);
         }
 
-        return _promptService.GetProductSearchPrompt(userMessage, products);
+        // Final fallback: No products prompt
+        _logger.LogWarning("All search methods failed, using no-products prompt");
+        return _promptService.GetNoProductsFoundPrompt(userMessage);
     }
 
     private async Task<string> BuildOrderStatusPromptAsync(

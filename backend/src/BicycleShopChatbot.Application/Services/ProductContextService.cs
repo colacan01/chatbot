@@ -92,11 +92,30 @@ public class ProductContextService : IProductContextService
             }
 
             // Perform vector similarity search
-            return await _vectorProductRepository.SearchBySimilarityAsync(
+            var results = await _vectorProductRepository.SearchBySimilarityAsync(
                 queryEmbedding,
                 maxResults,
                 _similarityThreshold,
                 cancellationToken);
+
+            // Log detailed search results
+            if (results.Any())
+            {
+                _logger.LogInformation("Vector search results for '{Query}':", query);
+                foreach (var result in results)
+                {
+                    _logger.LogInformation("  - {ProductName} (Score: {Similarity:F3})",
+                        result.Product.NameKorean, result.Similarity);
+                }
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Vector search returned 0 results for '{Query}' with threshold {Threshold}",
+                    query, _similarityThreshold);
+            }
+
+            return results;
         }
         catch (Exception ex)
         {
@@ -125,5 +144,31 @@ public class ProductContextService : IProductContextService
         CancellationToken cancellationToken = default)
     {
         return await _productRepository.GetByCategoryAsync(category, cancellationToken);
+    }
+
+    public async Task<List<Product>> GetProductsByPriceRangeAsync(
+        decimal? minPrice,
+        decimal? maxPrice,
+        CancellationToken cancellationToken = default)
+    {
+        return await _productRepository.GetByPriceRangeAsync(minPrice, maxPrice, cancellationToken);
+    }
+
+    public async Task<List<Product>> SearchProductsByNameAsync(
+        string productName,
+        CancellationToken cancellationToken = default)
+    {
+        return await _productRepository.SearchByProductNameAsync(productName, cancellationToken);
+    }
+
+    public async Task<List<Product>> SearchWithFiltersAsync(
+        decimal? minPrice,
+        decimal? maxPrice,
+        string? category,
+        string? productNameQuery,
+        CancellationToken cancellationToken = default)
+    {
+        return await _productRepository.SearchWithFiltersAsync(
+            minPrice, maxPrice, category, productNameQuery, cancellationToken);
     }
 }

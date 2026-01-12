@@ -12,6 +12,53 @@
 
 ---
 
+## 🚀 실제 구현 요약 (Quick Overview)
+
+### 기술 스택
+- **프레임워크**: ASP.NET Core 9.0
+- **데이터베이스**: PostgreSQL 16 + pgvector
+- **AI 모델**: Ollama (qwen2.5:14b + nomic-embed-text)
+- **실시간 통신**: SignalR WebSocket
+- **인증**: JWT (Access + Refresh Token)
+- **ORM**: Entity Framework Core 9.0
+
+### 핵심 기능
+✅ 벡터 기반 RAG (pgvector)  
+✅ 실시간 스트리밍 응답 (IAsyncEnumerable)  
+✅ 의도 감지 및 자동 라우팅  
+✅ 제품 검색 (벡터 유사도 + 키워드 Fallback)  
+✅ 대화 히스토리 관리  
+✅ 세션 기반 컨텍스트 유지  
+
+### 주요 API 엔드포인트
+- `POST /api/auth/login` - JWT 로그인
+- `GET /api/chat/sessions` - 사용자 세션 목록
+- `SignalR /hubs/chat` - 실시간 채팅
+  - `SendMessageStream` - 스트리밍 메시지 전송
+  - `ReceiveMessageChunk` - 청크 단위 수신
+
+### 구현된 엔티티
+- **User**: 사용자 (JWT 인증)
+- **ChatSession**: 대화 세션 (Guid ID)
+- **ChatMessage**: 메시지 (Role, Content, Category)
+- **Product**: 제품 (product_embeddings 테이블 매핑)
+- **ProductEmbedding**: 벡터 임베딩 (768차원)
+- **Order**: 주문
+- **FAQ**: 자주 묻는 질문
+
+### 구현된 서비스
+- **ChatService**: 대화 흐름 관리
+- **OllamaService**: AI 모델 통신 (HTTP Client)
+- **EmbeddingService**: 벡터 임베딩 생성
+- **PromptService**: 프롬프트 생성 및 의도 감지
+- **ProductContextService**: 제품 검색 (벡터 + 키워드)
+- **VectorProductRepository**: pgvector 기반 유사도 검색
+- **AuthService**: JWT 인증
+- **JwtTokenService**: 토큰 생성/검증
+- **BCryptPasswordHasher**: 비밀번호 해싱
+
+---
+
 ## 1. 아키텍처 개요
 
 ### 1.1 Clean Architecture 적용
@@ -147,11 +194,63 @@ backend/
 |------|------|------|
 | **프레임워크** | ASP.NET Core | 9.0 |
 | **ORM** | Entity Framework Core | 9.0 |
-| **데이터베이스** | SQLite (개발) | 3.x |
+| **데이터베이스** | PostgreSQL (with pgvector) | 16.x |
 | **실시간 통신** | SignalR + WebSocket | 9.0 |
-| **AI 모델** | Ollama (qwen2.5:7b) | - |
+| **AI 모델** | Ollama (qwen2.5:14b) | - |
+| **임베딩 모델** | nomic-embed-text | - |
 | **인증** | JWT Bearer + BCrypt | - |
 | **언어** | C# | 13.0 |
+
+### 1.4 실제 구현된 주요 컴포넌트
+
+#### Controllers
+- **ChatController**: REST API 엔드포인트 (세션 관리)
+- **AuthController**: 인증/회원가입 API
+- **HealthController**: 헬스 체크 엔드포인트
+
+#### SignalR Hubs
+- **ChatHub**: 실시간 채팅 통신 (`/hubs/chat`)
+  - `SendMessage`: 비스트리밍 메시지 전송
+  - `SendMessageStream`: 스트리밍 메시지 전송
+  - `JoinSession`: 세션 그룹 참여
+  - `LeaveSession`: 세션 그룹 퇴장
+  - `LoadSessionHistory`: 세션 히스토리 로드
+
+#### Services (Application Layer)
+- **ChatService**: 대화 처리 및 흐름 관리
+- **OllamaService**: AI 모델 통신 (스트리밍/비스트리밍)
+- **EmbeddingService**: 벡터 임베딩 생성
+- **PromptService**: 프롬프트 생성 및 의도 감지
+- **ProductContextService**: 제품 검색 (벡터 유사도)
+- **OrderContextService**: 주문 조회
+- **AuthService**: 인증 및 회원가입
+- **JwtTokenService**: JWT 토큰 생성/검증
+- **BCryptPasswordHasher**: 비밀번호 해싱
+
+#### Repositories (Infrastructure Layer)
+- **Generic Repository<T>**: 기본 CRUD 구현
+- **ChatSessionRepository**: 세션 관리
+- **ChatMessageRepository**: 메시지 CRUD
+- **ProductRepository**: 제품 조회
+- **VectorProductRepository**: 벡터 기반 제품 검색
+- **OrderRepository**: 주문 조회
+- **FAQRepository**: FAQ 검색
+- **UserRepository**: 사용자 관리
+
+#### Domain Entities
+- **ChatSession**: 대화 세션 (Guid Id, SessionId, UserId, Title)
+- **ChatMessage**: 메시지 (Role, Content, Timestamp, Category)
+- **Product**: 제품 정보 + 벡터 임베딩 (product_embeddings 테이블 매핑)
+- **ProductEmbedding**: 제품 벡터 데이터 (pgvector)
+- **Order**: 주문 정보
+- **FAQ**: 자주 묻는 질문
+- **User**: 사용자 (Email, PasswordHash, Role)
+
+#### Enums
+- **MessageRole**: User, Assistant, System
+- **ChatCategory**: General, ProductSearch, FAQ, OrderStatus
+- **MessageStatus**: Pending, Completed, Failed
+- **UserRole**: Admin, Customer
 
 ---
 
@@ -175,15 +274,19 @@ public class OllamaService : IOllamaService
 
 ### 2.2 연동 방식 상세
 
+### 2.2 연동 방식 상세
+
 #### 2.2.1 설정 파일 (`appsettings.json`)
 
 ```json
 {
   "Ollama": {
     "BaseUrl": "http://localhost:11434",
-    "ModelName": "qwen2.5:7b",
-    "TimeoutSeconds": "300",
+    "ModelName": "qwen2.5:14b",
+    "EmbeddingModel": "nomic-embed-text",
+    "TimeoutSeconds": "120",
     "MaxRetries": "3",
+    "RetryDelaySeconds": "2",
     "DefaultTemperature": "0.7"
   }
 }
@@ -193,20 +296,68 @@ public class OllamaService : IOllamaService
 - **BaseUrl**: Ollama 서버 주소 (기본: localhost:11434)
 - **ModelName**: 사용할 AI 모델
   - `qwen2.5:7b`: 권장 (4GB VRAM, 20-40초 응답)
-  - `qwen2.5:14b`: 고성능 (9GB VRAM, 1-2분 응답)
+  - `qwen2.5:14b`: 고성능 (9GB VRAM, 1-2분 응답) - **현재 사용**
   - `llama3.2:1b`: 경량 (1GB VRAM, 5-10초 응답)
-- **TimeoutSeconds**: HTTP 요청 타임아웃 (5분)
+- **EmbeddingModel**: 벡터 임베딩 모델 (nomic-embed-text)
+- **TimeoutSeconds**: HTTP 요청 타임아웃 (2분)
+- **MaxRetries**: 재시도 횟수
+- **RetryDelaySeconds**: 재시도 대기 시간
 - **DefaultTemperature**: 응답 다양성 (0.0~2.0)
   - 0.0: 결정론적, 일관됨
-  - 0.7: 균형 (권장)
+  - 0.7: 균형 (권장) - **현재 사용**
   - 1.5+: 창의적, 변동성 높음
 
-#### 2.2.2 HttpClient Factory 패턴
+#### 2.2.2 HttpClient Factory 패턴 (Program.cs)
 
-**DI 등록** (`Program.cs`):
+**OllamaService HTTP 클라이언트 설정**:
 ```csharp
-builder.Services.AddHttpClient<IOllamaService, OllamaService>();
+builder.Services.AddHttpClient<IOllamaService, OllamaService>()
+    .ConfigurePrimaryHttpMessageHandler(() =>
+    {
+        return new SocketsHttpHandler
+        {
+            // 연결 풀링: 오래된 연결 재사용 방지
+            PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+            MaxConnectionsPerServer = 10,
+
+            // Keep-alive: 유휴 연결 종료 방지
+            KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+            KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
+            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
+
+            // 연결 타임아웃 (요청 타임아웃과 별개)
+            ConnectTimeout = TimeSpan.FromSeconds(30),
+            MaxResponseHeadersLength = 128
+        };
+    })
+    .SetHandlerLifetime(TimeSpan.FromMinutes(30));
 ```
+
+**EmbeddingService HTTP 클라이언트 설정**:
+```csharp
+builder.Services.AddHttpClient<IEmbeddingService, EmbeddingService>()
+    .ConfigurePrimaryHttpMessageHandler(() =>
+    {
+        return new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+            MaxConnectionsPerServer = 10,
+            KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+            KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
+            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
+            ConnectTimeout = TimeSpan.FromSeconds(30)
+        };
+    })
+    .SetHandlerLifetime(TimeSpan.FromMinutes(30));
+```
+
+**핵심 최적화 포인트**:
+- **PooledConnectionLifetime**: 15분마다 연결 재생성 (메모리 누수 방지)
+- **KeepAlivePingDelay**: 60초마다 ping 전송 (연결 유지)
+- **MaxConnectionsPerServer**: 최대 10개 동시 연결
+- **SetHandlerLifetime**: 30분마다 핸들러 재생성
 
 **생성자 주입**:
 ```csharp
@@ -512,98 +663,235 @@ if (!await ollamaService.IsModelAvailableAsync())
   3. **의미적 검색**: 쿼리와 유사한 문서 검색
   4. **컨텍스트 주입**: 검색 결과를 프롬프트에 추가
 
-### 3.2 현재 구현 상태: ❌ **진정한 RAG 미구현**
+### 3.2 현재 구현 상태: ✅ **벡터 기반 RAG 구현 완료**
 
-**검색 결과**:
-- ❌ 벡터 데이터베이스 미사용
-- ❌ 문서 임베딩 기능 없음
-- ❌ 의미적 검색 미지원
-- ❌ Ollama Embeddings API 미연동
+**구현된 기능**:
+- ✅ 벡터 데이터베이스 사용 (PostgreSQL + pgvector)
+- ✅ 문서 임베딩 기능 (nomic-embed-text)
+- ✅ 의미적 검색 지원 (코사인 유사도)
+- ✅ Ollama Embeddings API 연동
+- ✅ ProductEmbedding 엔티티 구현
+- ✅ VectorProductRepository 구현
 
-**대신 사용 중인 방식**: **문자열 기반 컨텍스트 주입**
+**데이터베이스 구조**:
+```sql
+-- product_embeddings 테이블 (기존 데이터 재사용)
+CREATE TABLE product_embeddings (
+    id SERIAL PRIMARY KEY,
+    product_code VARCHAR(50) UNIQUE,
+    name VARCHAR(200),
+    name_korean VARCHAR(200),
+    category VARCHAR(100),
+    brand VARCHAR(100),
+    price DECIMAL(10,2),
+    description TEXT,
+    description_korean TEXT,
+    specifications TEXT,
+    stock_quantity INTEGER,
+    is_available BOOLEAN,
+    image_url TEXT,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP,
+    embedding vector(768)  -- nomic-embed-text 차원
+);
 
-### 3.3 현재 구현: 간단한 컨텍스트 검색
+-- 벡터 유사도 검색 인덱스
+CREATE INDEX idx_product_embeddings_vector 
+ON product_embeddings 
+USING ivfflat (embedding vector_cosine_ops) 
+WITH (lists = 100);
+```
 
-#### 3.3.1 ProductContextService (제품 검색)
+### 3.3 벡터 기반 제품 검색 구현
 
-**파일**: `BicycleShopChatbot.Application/Services/ProductContextService.cs`
+#### 3.3.1 EmbeddingService (임베딩 생성)
+
+**파일**: `BicycleShopChatbot.Application/Services/EmbeddingService.cs`
 
 ```csharp
-public async Task<List<Product>> SearchProductsAsync(
-    string query,
-    int maxResults = 10,
-    CancellationToken cancellationToken = default)
+public class EmbeddingService : IEmbeddingService
 {
-    var searchTerm = query.ToLower();
+    private readonly HttpClient _httpClient;
+    private readonly string _embeddingModel = "nomic-embed-text";
 
-    return await _productRepository
-        .SearchProductsAsync(searchTerm, maxResults, cancellationToken);
+    public async Task<float[]?> GenerateEmbeddingAsync(
+        string text,
+        CancellationToken cancellationToken = default)
+    {
+        var requestBody = new
+        {
+            model = _embeddingModel,
+            input = text
+        };
+
+        var response = await _httpClient.PostAsJsonAsync(
+            "/api/embed",
+            requestBody,
+            cancellationToken);
+
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+
+        if (result.TryGetProperty("embeddings", out var embeddings))
+        {
+            var vectorList = new List<float>();
+            foreach (var value in embeddings[0].EnumerateArray())
+            {
+                vectorList.Add((float)value.GetDouble());
+            }
+            return vectorList.ToArray(); // 768차원 벡터
+        }
+
+        return null;
+    }
+
+    public string BuildSearchableText(Product product)
+    {
+        var parts = new List<string>
+        {
+            product.NameKorean,
+            product.Name,
+            product.Category,
+            product.Brand,
+            product.DescriptionKorean ?? string.Empty,
+            product.Specifications
+        };
+        return string.Join(" ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+    }
 }
 ```
 
-**ProductRepository 구현**:
-```csharp
-public async Task<List<Product>> SearchProductsAsync(
-    string searchTerm,
-    int maxResults,
-    CancellationToken cancellationToken)
-{
-    var lowerSearchTerm = searchTerm.ToLower();
+**재시도 로직 포함**:
+- MaxRetries: 3회
+- Exponential Backoff: 2초 → 4초 → 8초
+- Rate Limiting: 각 임베딩 간 100ms 딜레이
 
-    return await _dbSet
-        .Where(p => p.IsAvailable &&
-                   (p.Name.ToLower().Contains(lowerSearchTerm) ||           // 영문명
-                    p.NameKorean.ToLower().Contains(lowerSearchTerm) ||     // 한글명
-                    p.Category.ToLower().Contains(lowerSearchTerm) ||       // 카테고리
-                    p.Brand.ToLower().Contains(lowerSearchTerm) ||          // 브랜드
-                    p.Description.ToLower().Contains(lowerSearchTerm) ||    // 영문 설명
-                    p.DescriptionKorean.ToLower().Contains(lowerSearchTerm))) // 한글 설명
-        .Take(maxResults)
-        .ToListAsync(cancellationToken);
+#### 3.3.2 VectorProductRepository (벡터 검색)
+
+**파일**: `BicycleShopChatbot.Infrastructure/Repositories/Implementation/VectorProductRepository.cs`
+
+```csharp
+public class VectorProductRepository : IVectorProductRepository
+{
+    private readonly ApplicationDbContext _context;
+    private readonly IEmbeddingService _embeddingService;
+    private readonly ILogger<VectorProductRepository> _logger;
+
+    public async Task<List<Product>> SearchByVectorAsync(
+        string queryText,
+        int maxResults = 10,
+        double similarityThreshold = 0.5,
+        CancellationToken cancellationToken = default)
+    {
+        // 1. 쿼리 텍스트를 벡터로 변환
+        var queryEmbedding = await _embeddingService.GenerateEmbeddingAsync(
+            queryText,
+            cancellationToken);
+
+        if (queryEmbedding == null)
+        {
+            _logger.LogWarning("Failed to generate embedding for query: {Query}", queryText);
+            return new List<Product>();
+        }
+
+        // 2. 벡터 유사도 검색 (코사인 유사도)
+        var vectorString = $"[{string.Join(",", queryEmbedding)}]";
+
+        var products = await _context.Products
+            .FromSqlRaw(@"
+                SELECT * 
+                FROM product_embeddings 
+                WHERE is_available = true 
+                  AND embedding IS NOT NULL
+                  AND 1 - (embedding <=> {0}::vector) >= {1}
+                ORDER BY embedding <=> {0}::vector
+                LIMIT {2}",
+                vectorString,
+                similarityThreshold,
+                maxResults)
+            .ToListAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Vector search for '{Query}' found {Count} products (threshold: {Threshold})",
+            queryText, products.Count, similarityThreshold);
+
+        return products;
+    }
 }
 ```
 
-**문제점**:
-- **LIKE 연산 기반**: O(n) 복잡도
-- **의미적 검색 불가**: "출퇴근용"과 "통근용"이 다른 단어로 인식
-- **타이포 허용 안 됨**: "로드바이크" ≠ "로드 바이크"
-- **언어 혼용**: 한영 혼용 검색 어려움
+**핵심 개념**:
+- **<=>**: pgvector의 코사인 거리 연산자
+- **1 - 거리 = 유사도**: 0~1 범위 (1에 가까울수록 유사)
+- **similarityThreshold**: 최소 유사도 임계값 (기본 0.5)
 
-#### 3.3.2 FAQContextService (FAQ 검색)
+#### 3.3.3 ProductContextService (벡터 검색 통합)
 
 ```csharp
-public async Task<List<FAQ>> SearchFAQsAsync(
-    string searchTerm,
-    int maxResults = 10,
-    CancellationToken cancellationToken = default)
+public class ProductContextService : IProductContextService
 {
-    return await _faqRepository.SearchFAQsAsync(searchTerm, maxResults, cancellationToken);
+    private readonly IVectorProductRepository _vectorRepository;
+    private readonly IProductRepository _productRepository;
+
+    public async Task<List<Product>> SearchProductsAsync(
+        string query,
+        int maxResults = 10,
+        CancellationToken cancellationToken = default)
+    {
+        // 우선 벡터 검색 시도
+        var vectorResults = await _vectorRepository.SearchByVectorAsync(
+            query,
+            maxResults,
+            similarityThreshold: 0.5,
+            cancellationToken);
+
+        if (vectorResults.Any())
+        {
+            _logger.LogInformation(
+                "Vector search returned {Count} results for query: {Query}",
+                vectorResults.Count, query);
+            return vectorResults;
+        }
+
+        // Fallback: 키워드 검색
+        _logger.LogInformation(
+            "Vector search returned no results, falling back to keyword search");
+        return await _productRepository.SearchProductsAsync(
+            query,
+            maxResults,
+            cancellationToken);
+    }
 }
 ```
 
-**FAQRepository 구현**:
-```csharp
-public async Task<List<FAQ>> SearchFAQsAsync(
-    string searchTerm,
-    int maxResults,
-    CancellationToken cancellationToken)
-{
-    var lowerSearchTerm = searchTerm.ToLower();
+**검색 전략**:
+1. **1차**: 벡터 유사도 검색 (의미적 검색)
+2. **2차**: 키워드 검색 (Fallback)
 
-    return await _dbSet
-        .Where(f => f.IsActive &&
-                   (f.QuestionKorean.ToLower().Contains(lowerSearchTerm) ||
-                    f.AnswerKorean.ToLower().Contains(lowerSearchTerm) ||
-                    (f.Keywords != null && f.Keywords.ToLower().Contains(lowerSearchTerm))))
-        .OrderByDescending(f => f.ViewCount)  // ← 인기도 기반 정렬
-        .Take(maxResults)
-        .ToListAsync(cancellationToken);
-}
+### 3.4 벡터 검색의 장점
+
+**기존 키워드 검색 문제점**:
+```csharp
+// LIKE 연산 기반 - 정확한 일치만 검색
+p.NameKorean.Contains("출퇴근")  // "통근용"은 못 찾음
 ```
 
-### 3.4 컨텍스트 주입 방식
+**벡터 검색 장점**:
+```sql
+-- 의미적 유사도 기반 검색
+"출퇴근용 자전거 추천" 
+→ "도시형 하이브리드 바이크" (유사도: 0.85)
+→ "통근용 전기자전거" (유사도: 0.82)
+→ "가벼운 알루미늄 로드바이크" (유사도: 0.78)
+```
 
-#### 3.4.1 PromptService의 컨텍스트 생성
+**실제 효과**:
+- ✅ 동의어 인식: "출퇴근" ≈ "통근"
+- ✅ 문맥 이해: "예산 100만원" → 가격대 필터링
+- ✅ 다국어 지원: "road bike" ≈ "로드바이크"
+- ✅ 타이포 허용: "로드 바이크" ≈ "로드바이크"
+
+### 3.5 컨텍스트 주입 방식
 
 **제품 검색 프롬프트 생성**:
 ```csharp
@@ -871,14 +1159,15 @@ public async Task<List<Product>> SemanticSearchAsync(float[] queryEmbedding, int
 var builder = WebApplication.CreateBuilder(args);
 
 // ============================================
-// 1. 데이터베이스 등록 (Infrastructure Layer)
+// 1. 데이터베이스 등록 (PostgreSQL + pgvector)
 // ============================================
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
-
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
-    options.UseSqlite(connectionString ?? "Data Source=bicycleshop.db");
-    options.EnableSensitiveDataLogging(builder.Environment.IsDevelopment());
+    var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+    options.UseNpgsql(connectionString, npgsqlOptions =>
+    {
+        npgsqlOptions.UseVector();  // pgvector 확장 활성화
+    });
 });
 
 // ============================================
@@ -888,75 +1177,185 @@ var jwtSettingsSection = builder.Configuration.GetSection("JwtSettings");
 var jwtSettings = new BicycleShopChatbot.Application.DTOs.JwtSettings();
 jwtSettingsSection.Bind(jwtSettings);
 
-builder.Services.AddSingleton(jwtSettings);
+// Application.DTOs.JwtSettings
+builder.Services.AddSingleton<BicycleShopChatbot.Application.DTOs.JwtSettings>(jwtSettings);
+
+// Infrastructure.Auth.JwtSettings (하위 호환성)
+builder.Services.AddSingleton<BicycleShopChatbot.Infrastructure.Auth.JwtSettings>(sp =>
+{
+    var appSettings = sp.GetRequiredService<BicycleShopChatbot.Application.DTOs.JwtSettings>();
+    return new BicycleShopChatbot.Infrastructure.Auth.JwtSettings
+    {
+        Secret = appSettings.Secret,
+        Issuer = appSettings.Issuer,
+        Audience = appSettings.Audience,
+        AccessTokenExpirationMinutes = appSettings.AccessTokenExpirationMinutes,
+        RefreshTokenExpirationDays = appSettings.RefreshTokenExpirationDays
+    };
+});
 
 // ============================================
 // 3. CORS 정책 설정
 // ============================================
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAngularApp", policy =>
+    options.AddPolicy("AllowAngular", policy =>
     {
-        policy.WithOrigins("http://localhost:4200")
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials();  // SignalR을 위해 필수
+        policy.WithOrigins(
+                builder.Configuration["Cors:AllowedOrigins"]?.Split(',') ??
+                new[] { "http://localhost:4200" })
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();  // SignalR을 위해 필수
     });
 });
 
 // ============================================
 // 4. 인증/권한 부여 (Authentication & Authorization)
 // ============================================
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    options.TokenValidationParameters = new TokenValidationParameters
     {
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            ValidIssuer = jwtSettings.Issuer,
-            ValidAudience = jwtSettings.Audience,
-            IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(jwtSettings.SecretKey)),
-            ClockSkew = TimeSpan.Zero
-        };
+        ValidateIssuer = true,
+        ValidateAudience = true,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true,
+        ValidIssuer = jwtSettings.Issuer,
+        ValidAudience = jwtSettings.Audience,
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.Secret)),
+        ClockSkew = TimeSpan.Zero
+    };
 
-        // SignalR을 위한 토큰 처리
-        options.Events = new JwtBearerEvents
+    // SignalR에서 JWT 토큰 사용 설정
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
         {
-            OnMessageReceived = context =>
+            var accessToken = context.Request.Query["access_token"];
+            var path = context.HttpContext.Request.Path;
+            if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
             {
-                var accessToken = context.Request.Query["access_token"];
-                var path = context.HttpContext.Request.Path;
-
-                if (!string.IsNullOrEmpty(accessToken) &&
-                    path.StartsWithSegments("/hub/chat"))
-                {
-                    context.Token = accessToken;
-                }
-
-                return Task.CompletedTask;
+                context.Token = accessToken;
             }
-        };
-    });
+            return Task.CompletedTask;
+        }
+    };
+});
 
 builder.Services.AddAuthorization();
 
 // ============================================
 // 5. SignalR 등록
 // ============================================
-builder.Services.AddSignalR(options =>
-{
-    options.EnableDetailedErrors = builder.Environment.IsDevelopment();
-    options.MaximumReceiveMessageSize = 102400;  // 100KB
-});
+builder.Services.AddSignalR();
 
 // ============================================
 // 6. Repository 패턴 등록 (Scoped)
 // ============================================
+// Generic Repository
 builder.Services.AddScoped<IRepository<ChatSession>, Repository<ChatSession>>();
+builder.Services.AddScoped<IRepository<ChatMessage>, Repository<ChatMessage>>();
+builder.Services.AddScoped<IRepository<Product>, Repository<Product>>();
+builder.Services.AddScoped<IRepository<ProductEmbedding>, Repository<ProductEmbedding>>();
+builder.Services.AddScoped<IRepository<Order>, Repository<Order>>();
+builder.Services.AddScoped<IRepository<FAQ>, Repository<FAQ>>();
+builder.Services.AddScoped<IRepository<User>, Repository<User>>();
+
+// Specialized Repository
+builder.Services.AddScoped<IChatSessionRepository, ChatSessionRepository>();
+builder.Services.AddScoped<IChatMessageRepository, ChatMessageRepository>();
+builder.Services.AddScoped<IProductRepository, ProductRepository>();
+builder.Services.AddScoped<IVectorProductRepository, VectorProductRepository>();  // 벡터 검색
+builder.Services.AddScoped<IOrderRepository, OrderRepository>();
+builder.Services.AddScoped<IFAQRepository, FAQRepository>();
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+
+// ============================================
+// 7. Application Services 등록 (Scoped)
+// ============================================
+builder.Services.AddScoped<IChatService, ChatService>();
+builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IPromptService, PromptService>();
+builder.Services.AddScoped<IProductContextService, ProductContextService>();
+builder.Services.AddScoped<IOrderContextService, OrderContextService>();
+builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+builder.Services.AddScoped<IPasswordHasher, BCryptPasswordHasher>();
+
+// ============================================
+// 8. Embedding Service (전용 HttpClient)
+// ============================================
+builder.Services.AddHttpClient<IEmbeddingService, EmbeddingService>()
+    .ConfigurePrimaryHttpMessageHandler(() =>
+    {
+        return new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+            MaxConnectionsPerServer = 10,
+            KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+            KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
+            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
+            ConnectTimeout = TimeSpan.FromSeconds(30)
+        };
+    })
+    .SetHandlerLifetime(TimeSpan.FromMinutes(30));
+
+// ============================================
+// 9. Ollama Service (전용 HttpClient)
+// ============================================
+builder.Services.AddHttpClient<IOllamaService, OllamaService>()
+    .ConfigurePrimaryHttpMessageHandler(() =>
+    {
+        return new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+            MaxConnectionsPerServer = 10,
+            KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+            KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
+            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
+            ConnectTimeout = TimeSpan.FromSeconds(30),
+            MaxResponseHeadersLength = 128
+        };
+    })
+    .SetHandlerLifetime(TimeSpan.FromMinutes(30));
+
+// ============================================
+// 10. 데이터베이스 시드 (Database Seeding)
+// ============================================
+var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+    var context = services.GetRequiredService<ApplicationDbContext>();
+    var logger = services.GetRequiredService<ILogger<DatabaseSeeder>>();
+
+    var seeder = new DatabaseSeeder(context, logger);
+    await seeder.SeedAsync();
+}
+
+// ============================================
+// 11. 미들웨어 파이프라인
+// ============================================
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
+
+app.UseCors("AllowAngular");
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapControllers();
+app.MapHub<ChatHub>("/hubs/chat");
+
+app.Run();
 builder.Services.AddScoped<IRepository<ChatMessage>, Repository<ChatMessage>>();
 builder.Services.AddScoped<IRepository<Product>, Repository<Product>>();
 builder.Services.AddScoped<IRepository<Order>, Repository<Order>>();
@@ -1349,25 +1748,34 @@ app.Run();
      │                                               │
      │ N                                             │ N
      │ 1                                             │ 1
-┌────▼────────────────┐         ┌──────────────────▼────┐
-│      Product        │         │        Order           │
-│────────────────────│         │───────────────────────│
-│ Id (PK)            │         │ Id (PK)               │
-│ ProductCode (Unique│         │ OrderNumber (Unique)  │
-│ Name               │         │ CustomerEmail         │
-│ NameKorean         │         │ CustomerPhone         │
-│ Category           │         │ Status                │
-│ Brand              │         │ OrderDate             │
-│ Price              │         │ TotalAmount           │
-│ Description        │         │ ShippingAddress       │
-│ DescriptionKorean  │         │ TrackingNumber        │
-│ Specifications     │         │ EstimatedDelivery     │
-│ StockQuantity      │         │ UpdatedAt             │
-│ IsAvailable        │         └───────────────────────┘
-│ ImageUrl           │
-│ CreatedAt          │
-│ UpdatedAt          │
-└────────────────────┘
+┌────▼──────────────────────┐   ┌──────────────────▼────┐
+│   Product (Product)       │   │        Order           │
+│ (product_embeddings 매핑) │   │───────────────────────│
+│──────────────────────────│   │ Id (PK)               │
+│ Id (PK)                  │   │ OrderNumber (Unique)  │
+│ ProductCode (Unique)     │   │ CustomerEmail         │
+│ Name                     │   │ CustomerPhone         │
+│ NameKorean               │   │ Status                │
+│ Category                 │   │ OrderDate             │
+│ Brand                    │   │ TotalAmount           │
+│ Price                    │   │ ShippingAddress       │
+│ Description              │   │ TrackingNumber        │
+│ DescriptionKorean        │   │ EstimatedDelivery     │
+│ Specifications (JSON)    │   │ UpdatedAt             │
+│ StockQuantity            │   └───────────────────────┘
+│ IsAvailable              │
+│ ImageUrl                 │
+│ CreatedAt                │
+│ UpdatedAt                │
+└──────────────────────────┘
+     ↕ (매핑)
+┌──────────────────────────────┐
+│   ProductEmbedding           │
+│   (product_embeddings 테이블)│
+│──────────────────────────────│
+│ * Product와 동일 스키마      │
+│ + embedding vector(768)      │
+└──────────────────────────────┘
 
 ┌──────────────────────────┐
 │         FAQ              │
@@ -1384,6 +1792,9 @@ app.Run();
 │ CreatedAt               │
 └──────────────────────────┘
 ```
+
+**중요**: Product 엔티티는 기존 `product_embeddings` 테이블을 매핑하여 사용합니다. 
+ProductEmbedding은 벡터 검색 전용 엔티티입니다.
 
 ### 6.2 엔티티 상세 설명
 
@@ -2040,25 +2451,66 @@ dotnet ef database update --project ../BicycleShopChatbot.Infrastructure
 
 #### A.3 환경 변수
 
-**appsettings.Development.json**:
+**appsettings.json** (실제 구성):
 ```json
 {
   "ConnectionStrings": {
-    "DefaultConnection": "Data Source=bicycleshop.db"
+    "DefaultConnection": "Host=localhost;Database=postgres;Username=postgres;Password=postgres"
   },
   "Ollama": {
     "BaseUrl": "http://localhost:11434",
-    "ModelName": "qwen2.5:7b",
-    "TimeoutSeconds": "300",
+    "ModelName": "qwen2.5:14b",
+    "EmbeddingModel": "nomic-embed-text",
+    "TimeoutSeconds": "120",
+    "MaxRetries": "3",
+    "RetryDelaySeconds": "2",
     "DefaultTemperature": "0.7"
   },
   "JwtSettings": {
-    "SecretKey": "your-super-secret-key-change-this-in-production",
+    "Secret": "your-super-secret-key-at-least-32-characters-long-change-in-production",
     "Issuer": "BicycleShopChatbot",
     "Audience": "BicycleShopChatbotUsers",
     "AccessTokenExpirationMinutes": 15,
     "RefreshTokenExpirationDays": 7
+  },
+  "Cors": {
+    "AllowedOrigins": "http://localhost:4200"
   }
+}
+```
+
+**PostgreSQL 설정**:
+```bash
+# PostgreSQL + pgvector 설치 (Ubuntu/Debian)
+sudo apt install postgresql postgresql-contrib
+sudo apt install postgresql-16-pgvector
+
+# PostgreSQL 시작
+sudo systemctl start postgresql
+
+# pgvector 확장 활성화
+psql -U postgres
+CREATE EXTENSION vector;
+```
+
+#### A.4 시드 데이터
+
+**DatabaseSeeder.cs** 실행 시 자동 생성:
+- **Users**: 2명 (admin, customer)
+- **Products**: 10개 (자전거 제품)
+- **ProductEmbeddings**: 10개 (벡터 임베딩)
+- **FAQs**: 20개 (자주 묻는 질문)
+- **Orders**: 3개 (샘플 주문)
+
+**시드 실행**:
+```csharp
+// Program.cs에서 자동 실행
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<DatabaseSeeder>>();
+    var seeder = new DatabaseSeeder(context, logger);
+    await seeder.SeedAsync();
 }
 ```
 
@@ -2097,26 +2549,60 @@ dotnet ef database update --project ../BicycleShopChatbot.Infrastructure
 
 본 자전거 쇼핑몰 챗봇 백엔드는 **Clean Architecture**를 완벽하게 적용하여 유지보수성과 확장성을 극대화했습니다.
 
-### 핵심 특징
+### 핵심 구현 완료 사항
 
-✅ **Ollama 로컬 AI 통합**: qwen2.5:7b 모델을 사용한 한국어 대화
-✅ **스트리밍 응답**: IAsyncEnumerable 기반 실시간 응답
-✅ **SignalR 실시간 통신**: WebSocket 기반 양방향 통신
-✅ **JWT 인증**: 보안 강화된 인증 시스템
-✅ **Repository 패턴**: 데이터 액세스 추상화
-✅ **의도 감지**: 사용자 메시지 카테고리 자동 분류
-✅ **컨텍스트 주입**: 제품/주문/FAQ 정보 기반 응답
+✅ **Ollama 로컬 AI 통합**: qwen2.5:14b 모델을 사용한 한국어 대화  
+✅ **스트리밍 응답**: IAsyncEnumerable 기반 실시간 응답  
+✅ **SignalR 실시간 통신**: WebSocket 기반 양방향 통신  
+✅ **JWT 인증**: Access Token + Refresh Token 기반 인증  
+✅ **Repository 패턴**: Generic + Specialized Repository 구현  
+✅ **의도 감지**: PromptService 기반 자동 카테고리 분류  
+✅ **벡터 RAG 구현**: PostgreSQL + pgvector 기반 의미적 검색  
+✅ **임베딩 생성**: nomic-embed-text 모델 통합 (768차원)  
+✅ **VectorProductRepository**: 코사인 유사도 기반 제품 검색  
+✅ **HttpClient 최적화**: Connection Pooling + Keep-alive 설정  
+✅ **데이터베이스 시딩**: 자동 샘플 데이터 생성  
+✅ **에러 처리**: Structured Logging + Exception Handling  
+
+### 아키텍처 하이라이트
+
+**레이어 분리**:
+- **Domain**: 비즈니스 엔티티 (User, ChatSession, Product 등)
+- **Application**: 서비스 로직 (ChatService, OllamaService 등)
+- **Infrastructure**: 데이터 액세스 (Repositories, DbContext)
+- **API**: 웹 인터페이스 (Controllers, SignalR Hubs)
+
+**데이터베이스**:
+- PostgreSQL 16 + pgvector 확장
+- EF Core 9.0 (Code-First 마이그레이션)
+- 기존 product_embeddings 테이블 재사용
+
+**AI 통합**:
+- Ollama HTTP API (스트리밍/비스트리밍)
+- 재시도 로직 (Exponential Backoff)
+- 타임아웃 및 에러 핸들링
+
+### 성능 최적화
+
+- **Eager Loading**: Include()로 N+1 문제 방지
+- **Vector Indexing**: IVFFlat 인덱스 (lists=100)
+- **Connection Pooling**: 15분 Connection Lifetime
+- **Keep-alive**: 60초 Ping 간격
+- **Rate Limiting**: 임베딩 API 호출 간 100ms 딜레이
 
 ### 향후 개선 방향
 
-🔜 **진정한 RAG 구현**: Pgvector 또는 Pinecone을 통한 의미적 검색
-🔜 **캐싱 시스템**: Redis 기반 응답 캐싱
-🔜 **Rate Limiting**: API 호출 제한
-🔜 **모니터링**: Application Insights 통합
-🔜 **테스트**: 단위/통합 테스트 추가
+🔜 **캐싱 시스템**: Redis 기반 응답 캐싱  
+🔜 **Rate Limiting**: API 호출 제한 미들웨어  
+🔜 **모니터링**: Prometheus + Grafana 통합  
+🔜 **테스트**: 단위/통합 테스트 추가 (xUnit)  
+🔜 **FAQ 벡터화**: FAQ도 벡터 검색 지원  
+🔜 **하이브리드 검색**: 벡터 + 키워드 스코어 결합  
+🔜 **사용자 피드백**: 응답 평가 시스템  
 
 ---
 
-**문서 버전**: 1.0
-**최종 수정**: 2025-01-09
-**작성자**: Claude Sonnet 4.5
+**문서 버전**: 2.0  
+**최종 수정**: 2026-01-12  
+**작성자**: GitHub Copilot (Claude Sonnet 4.5)  
+**프로젝트**: 자전거 쇼핑몰 AI 챗봇  

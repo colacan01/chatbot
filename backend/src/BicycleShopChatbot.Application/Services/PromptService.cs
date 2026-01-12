@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using BicycleShopChatbot.Application.Interfaces;
 using BicycleShopChatbot.Domain.Entities;
 using BicycleShopChatbot.Domain.Enums;
@@ -26,12 +27,31 @@ public class PromptService : IPromptService
         var sb = new StringBuilder();
         sb.AppendLine(GetProductSearchSystemPrompt());
         sb.AppendLine();
-        sb.AppendLine("## 현재 판매 중인 제품:");
+        sb.AppendLine("========================================");
+        sb.AppendLine("[ 판매 가능한 제품 목록 - 이 목록에만 있는 제품을 추천하세요 ]");
+        sb.AppendLine("========================================");
+
+        // Add numbered product list with product codes
+        for (int i = 0; i < products.Count; i++)
+        {
+            var product = products[i];
+            sb.AppendLine($"{i + 1}. {product.NameKorean} (제품코드: {product.ProductCode})");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("⚠️ 경고 1: 위 목록의 제품 번호와 제품코드를 정확히 확인하세요");
+        sb.AppendLine("⚠️ 경고 2: 목록에 없는 제품명은 절대 언급하지 마세요");
+        sb.AppendLine("⚠️ 경고 3: 제품을 추천할 때 반드시 제품코드를 함께 표시하세요");
+        sb.AppendLine();
+        sb.AppendLine("========================================");
+        sb.AppendLine("[ 제품 상세 정보 ]");
+        sb.AppendLine("========================================");
         sb.AppendLine();
 
         foreach (var product in products)
         {
             sb.AppendLine($"### {product.NameKorean} ({product.Name})");
+            sb.AppendLine($"- **제품코드**: {product.ProductCode}");
             sb.AppendLine($"- **카테고리**: {product.Category}");
             sb.AppendLine($"- **브랜드**: {product.Brand}");
             sb.AppendLine($"- **가격**: {product.Price:N0}원");
@@ -39,6 +59,15 @@ public class PromptService : IPromptService
             sb.AppendLine($"- **설명**: {product.DescriptionKorean}");
             sb.AppendLine();
         }
+
+        sb.AppendLine("========================================");
+        sb.AppendLine("[ 필수 준수사항 ]");
+        sb.AppendLine("========================================");
+        sb.AppendLine("- 추천 시 반드시 \"제품코드: XXX\"를 표시할 것");
+        sb.AppendLine($"- 위 번호 목록(1~{products.Count})에 없는 제품은 언급 금지");
+        sb.AppendLine("- \"기본 모델\", \"엔트리 모델\" 등 목록에 없는 변형 제품 언급 금지");
+        sb.AppendLine("- 제품이 부족하더라도 존재하지 않는 제품을 만들어내지 마세요");
+        sb.AppendLine("========================================");
 
         return sb.ToString();
     }
@@ -155,6 +184,171 @@ public class PromptService : IPromptService
         return ChatCategory.General;
     }
 
+    public string? ExtractProductCategory(string userMessage)
+    {
+        var lower = userMessage.ToLower();
+
+        // 산악 / Mountain
+        if (lower.Contains("산악") || lower.Contains("mtb") ||
+            lower.Contains("mountain") || lower.Contains("마운틴"))
+        {
+            return "Mountain";
+        }
+
+        // 로드 / Road
+        if (lower.Contains("로드") || lower.Contains("road") ||
+            lower.Contains("로드바이크") || lower.Contains("경주"))
+        {
+            return "Road";
+        }
+
+        // 하이브리드 / Hybrid
+        if (lower.Contains("하이브리드") || lower.Contains("hybrid") ||
+            lower.Contains("출퇴근"))
+        {
+            return "Hybrid";
+        }
+
+        // 전기 / Electric
+        if (lower.Contains("전기") || lower.Contains("electric") ||
+            lower.Contains("이-바이크") || lower.Contains("e-bike") ||
+            lower.Contains("전동"))
+        {
+            return "Electric";
+        }
+
+        // 접이식 / Folding
+        if (lower.Contains("접이식") || lower.Contains("폴딩") ||
+            lower.Contains("folding") || lower.Contains("휴대"))
+        {
+            return "Folding";
+        }
+
+        // 그래블 / Gravel
+        if (lower.Contains("그래블") || lower.Contains("gravel") ||
+            lower.Contains("어드벤처"))
+        {
+            return "Gravel";
+        }
+
+        // 키즈 / Kids
+        if (lower.Contains("어린이") || lower.Contains("키즈") ||
+            lower.Contains("kids") || lower.Contains("주니어") ||
+            lower.Contains("아이"))
+        {
+            return "Kids";
+        }
+
+        return null; // 카테고리 명시 없음
+    }
+
+    public (decimal? MinPrice, decimal? MaxPrice) ExtractPriceRange(string userMessage)
+    {
+        var lower = userMessage.ToLower();
+        decimal? minPrice = null;
+        decimal? maxPrice = null;
+
+        // Pattern 1: "X만원 이하" / "X만원 이내" / "X만원 미만"
+        var belowMatch = Regex.Match(lower, @"(\d+)만원\s*(이하|이내|미만)");
+        if (belowMatch.Success)
+        {
+            maxPrice = decimal.Parse(belowMatch.Groups[1].Value) * 10000;
+            if (belowMatch.Groups[2].Value == "미만")
+            {
+                maxPrice -= 1; // 미만은 해당 값 미포함
+            }
+            return (null, maxPrice);
+        }
+
+        // Pattern 2: "X만원 이상" / "X만원 초과"
+        var aboveMatch = Regex.Match(lower, @"(\d+)만원\s*(이상|초과)");
+        if (aboveMatch.Success)
+        {
+            minPrice = decimal.Parse(aboveMatch.Groups[1].Value) * 10000;
+            if (aboveMatch.Groups[2].Value == "초과")
+            {
+                minPrice += 1; // 초과는 해당 값 미포함
+            }
+            return (minPrice, null);
+        }
+
+        // Pattern 3: "X만원~Y만원" / "X만원에서 Y만원" / "X만원부터 Y만원"
+        var rangeMatch = Regex.Match(lower, @"(\d+)만원\s*[~\-에서부터]+\s*(\d+)만원");
+        if (rangeMatch.Success)
+        {
+            minPrice = decimal.Parse(rangeMatch.Groups[1].Value) * 10000;
+            maxPrice = decimal.Parse(rangeMatch.Groups[2].Value) * 10000;
+            return (minPrice, maxPrice);
+        }
+
+        // Pattern 4: "X만원대" (예: 100만원대 = 1,000,000 ~ 1,999,999)
+        var approximateMatch = Regex.Match(lower, @"(\d+)만원대");
+        if (approximateMatch.Success)
+        {
+            minPrice = decimal.Parse(approximateMatch.Groups[1].Value) * 10000;
+            maxPrice = minPrice + 999999; // 다음 백만 미만
+            return (minPrice, maxPrice);
+        }
+
+        return (null, null); // 가격 범위 명시 없음
+    }
+
+    public string? ExtractProductName(string userMessage)
+    {
+        var lower = userMessage.ToLower();
+
+        // Korean product names
+        var koreanProducts = new Dictionary<string, string>
+        {
+            { "스피드스터", "스피드스터 프로 카본" },
+            { "시티 커뮤터", "시티 커뮤터 디럭스" },
+            { "마운틴 익스플로러", "마운틴 익스플로러 XT" },
+            { "트레일 블레이저", "트레일 블레이저 프로" },
+            { "어드벤처 시커", "어드벤처 시커" },
+            { "컴팩트 폴더", "컴팩트 폴더" },
+            { "시티 이-커뮤터", "시티 이-커뮤터" },
+            { "이커뮤터", "시티 이-커뮤터" }, // 띄어쓰기 없는 경우
+            { "주니어 레이서", "주니어 레이서" },
+            { "에어로 스프린트", "에어로 스프린트 엘리트" },
+            { "컴포트 크루저", "컴포트 크루저" }
+        };
+
+        // English product names
+        var englishProducts = new Dictionary<string, string>
+        {
+            { "speedster", "스피드스터 프로 카본" },
+            { "city commuter", "시티 커뮤터 디럭스" },
+            { "mountain explorer", "마운틴 익스플로러 XT" },
+            { "trail blazer", "트레일 블레이저 프로" },
+            { "adventure seeker", "어드벤처 시커" },
+            { "compact folder", "컴팩트 폴더" },
+            { "city e-commuter", "시티 이-커뮤터" },
+            { "junior racer", "주니어 레이서" },
+            { "aero sprint", "에어로 스프린트 엘리트" },
+            { "comfort cruiser", "컴포트 크루저" }
+        };
+
+        // Check Korean names first
+        foreach (var (keyword, productName) in koreanProducts)
+        {
+            if (lower.Contains(keyword.ToLower()))
+            {
+                return productName;
+            }
+        }
+
+        // Check English names
+        foreach (var (keyword, productName) in englishProducts)
+        {
+            if (lower.Contains(keyword))
+            {
+                return productName;
+            }
+        }
+
+        return null; // 상품명 명시 없음
+    }
+
     private string GetProductSearchSystemPrompt()
     {
         return @"당신은 대한민국의 자전거 전문 온라인 쇼핑몰 AI 상담원입니다.
@@ -165,7 +359,11 @@ public class PromptService : IPromptService
 ========================================
 1. 언어: 반드시 한국어로만 답변하세요. 중국어, 영어, 일본어 등 다른 언어는 절대 사용하지 마세요.
 2. 역할: 당신은 대한민국의 자전거 전문 온라인 쇼핑몰 상담원입니다.
-3. 예산 준수: 고객이 예산을 제시한 경우, 예산 이하 또는 예산의 +10% 이내 금액의 상품만 소개하세요.
+3. 제품 목록 엄수: 절대로 위에 제공된 제품 목록에 없는 제품을 언급하거나 추천하지 마세요.
+   - 제공된 제품만 소개할 수 있습니다
+   - 존재하지 않는 제품명을 만들어내지 마세요
+   - 제품이 목록에 없으면 ""해당 제품은 현재 재고가 없습니다""라고 명확히 말하세요
+4. 예산 준수: 고객이 예산을 제시한 경우, 예산 이하 또는 예산의 +10% 이내 금액의 상품만 소개하세요.
    - 예시: 예산 100만원 → 최대 110만원까지만 추천 가능
    - 예산을 초과하는 상품은 절대 추천하지 마세요
 ========================================
@@ -277,6 +475,38 @@ public class PromptService : IPromptService
 1. 친절하고 전문적인 한국어 톤을 유지하세요
 2. 고객의 질문 의도를 파악하고 적절히 대응하세요
 3. 예산이 언급되면 반드시 예산 범위 내에서만 상품을 추천하세요";
+    }
+
+    public string GetNoProductsFoundPrompt(string query)
+    {
+        return $@"당신은 대한민국의 자전거 전문 온라인 쇼핑몰 AI 상담원입니다.
+
+고객이 문의한 제품: ""{query}""
+
+========================================
+[ 중요 안내 ]
+========================================
+현재 해당 제품은 재고가 없거나 판매하지 않는 제품입니다.
+
+고객에게 다음과 같이 안내하세요:
+1. ""죄송합니다. '{query}'는 현재 재고가 없거나 취급하지 않는 제품입니다.""
+2. 고객의 용도(출퇴근, 운동, 레저 등)를 물어보세요
+3. 비슷한 제품이 필요하면 고객센터(1588-0000)로 안내하세요
+
+절대로 존재하지 않는 제품명을 언급하지 마세요!
+========================================";
+    }
+
+    public double GetTemperatureForCategory(ChatCategory category)
+    {
+        return category switch
+        {
+            ChatCategory.ProductSearch => 0.3,    // Factual, less hallucination
+            ChatCategory.ProductDetails => 0.3,   // Factual specs only
+            ChatCategory.OrderStatus => 0.2,      // Extremely factual
+            ChatCategory.FAQ => 0.4,              // Slightly creative for explanations
+            _ => 0.7                               // Default for general chat
+        };
     }
 
     private string GetOrderStatusKorean(string status)

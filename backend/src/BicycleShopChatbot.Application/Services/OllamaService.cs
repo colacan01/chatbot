@@ -38,6 +38,7 @@ public class OllamaService : IOllamaService
         string userMessage,
         List<ChatMessageDto> conversationHistory,
         string systemPrompt,
+        double temperature,
         CancellationToken cancellationToken = default)
     {
         try
@@ -51,7 +52,7 @@ public class OllamaService : IOllamaService
                 stream = false,
                 options = new
                 {
-                    temperature = _temperature,
+                    temperature = temperature,
                     top_p = 0.9,
                     top_k = 40
                 }
@@ -98,6 +99,7 @@ public class OllamaService : IOllamaService
         string userMessage,
         List<ChatMessageDto> conversationHistory,
         string systemPrompt,
+        double temperature,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var messages = BuildMessagePayload(userMessage, conversationHistory, systemPrompt);
@@ -109,7 +111,7 @@ public class OllamaService : IOllamaService
             stream = true,  // 스트리밍 활성화
             options = new
             {
-                temperature = _temperature,
+                temperature = temperature,
                 top_p = 0.9,
                 top_k = 40
             }

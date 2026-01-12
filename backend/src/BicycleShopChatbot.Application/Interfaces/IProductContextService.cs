@@ -16,4 +16,20 @@ public interface IProductContextService
     Task<List<Product>> GetProductsByCategoryAsync(
         string category,
         CancellationToken cancellationToken = default);
+
+    Task<List<Product>> GetProductsByPriceRangeAsync(
+        decimal? minPrice,
+        decimal? maxPrice,
+        CancellationToken cancellationToken = default);
+
+    Task<List<Product>> SearchProductsByNameAsync(
+        string productName,
+        CancellationToken cancellationToken = default);
+
+    Task<List<Product>> SearchWithFiltersAsync(
+        decimal? minPrice,
+        decimal? maxPrice,
+        string? category,
+        string? productNameQuery,
+        CancellationToken cancellationToken = default);
 }

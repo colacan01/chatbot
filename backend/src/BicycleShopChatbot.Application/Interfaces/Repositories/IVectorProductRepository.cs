@@ -34,6 +34,31 @@ public interface IVectorProductRepository : IRepository<Product>
     Task UpsertProductEmbeddingAsync(
         Product productEmbedding,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get products by price range
+    /// </summary>
+    Task<List<Product>> GetByPriceRangeAsync(
+        decimal? minPrice,
+        decimal? maxPrice,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Search products by name (Korean or English)
+    /// </summary>
+    Task<List<Product>> SearchByProductNameAsync(
+        string productName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Search products with combined filters (price, category, product name)
+    /// </summary>
+    Task<List<Product>> SearchWithFiltersAsync(
+        decimal? minPrice,
+        decimal? maxPrice,
+        string? category,
+        string? productNameQuery,
+        CancellationToken cancellationToken = default);
 }
 
 public class VectorSearchResult

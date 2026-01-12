@@ -39,10 +39,7 @@ public class VectorProductRepository : Repository<Product>, IVectorProductReposi
 
             var sql = @"
                 SELECT
-                    id, product_code, name, name_korean, category, brand, price,
-                    description, description_korean, detailed_description,
-                    specifications, stock_quantity, is_available, image_url,
-                    embedding, searchable_text, created_at, updated_at,
+                    id,
                     (1 - (embedding <=> @queryVector::vector)) as similarity
                 FROM product_embeddings
                 WHERE embedding IS NOT NULL
@@ -51,7 +48,7 @@ public class VectorProductRepository : Repository<Product>, IVectorProductReposi
                 ORDER BY embedding <=> @queryVector::vector
                 LIMIT @maxResults";
 
-            var results = new List<VectorSearchResult>();
+            var productIdsSimilarities = new List<(int Id, double Similarity)>();
 
             await using var command = _context.Database.GetDbConnection().CreateCommand();
             command.CommandText = sql;
@@ -64,32 +61,42 @@ public class VectorProductRepository : Repository<Product>, IVectorProductReposi
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                var product = new Product
-                {
-                    Id = reader.GetInt32(0),
-                    ProductCode = reader.GetString(1),
-                    Name = reader.GetString(2),
-                    NameKorean = reader.GetString(3),
-                    Category = reader.GetString(4),
-                    Brand = reader.GetString(5),
-                    Price = reader.GetDecimal(6),
-                    Description = reader.IsDBNull(7) ? null : reader.GetString(7),
-                    DescriptionKorean = reader.IsDBNull(8) ? null : reader.GetString(8),
-                    Specifications = reader.GetString(10),
-                    StockQuantity = reader.GetInt32(11),
-                    IsAvailable = reader.GetBoolean(12),
-                    ImageUrl = reader.IsDBNull(13) ? null : reader.GetString(13),
-                    CreatedAt = reader.GetDateTime(16),
-                    UpdatedAt = reader.GetDateTime(17)
-                };
+                var id = reader.GetInt32(0);
+                var similarity = reader.GetDouble(1);
+                productIdsSimilarities.Add((id, similarity));
+            }
 
-                var similarity = reader.GetDouble(18);
+            await reader.CloseAsync();
 
-                results.Add(new VectorSearchResult
+            // If no results from vector search, return empty list
+            if (!productIdsSimilarities.Any())
+            {
+                _logger.LogInformation(
+                    "Vector search returned 0 results (threshold: {Threshold})",
+                    similarityThreshold);
+                return new List<VectorSearchResult>();
+            }
+
+            // Reload Products from EF Core with AsNoTracking to ensure fresh data
+            var productIds = productIdsSimilarities.Select(x => x.Id).ToList();
+            var products = await _dbSet
+                .AsNoTracking()
+                .Where(p => productIds.Contains(p.Id))
+                .ToListAsync(cancellationToken);
+
+            // Combine Products with similarity scores, preserving order from vector search
+            var results = new List<VectorSearchResult>();
+            foreach (var (id, similarity) in productIdsSimilarities)
+            {
+                var product = products.FirstOrDefault(p => p.Id == id);
+                if (product != null)
                 {
-                    Product = product,
-                    Similarity = similarity
-                });
+                    results.Add(new VectorSearchResult
+                    {
+                        Product = product,
+                        Similarity = similarity
+                    });
+                }
             }
 
             _logger.LogInformation(
@@ -113,6 +120,7 @@ public class VectorProductRepository : Repository<Product>, IVectorProductReposi
         var lowerSearchTerm = searchTerm.ToLower();
 
         return await _dbSet
+            .AsNoTracking()
             .Where(p => p.IsAvailable &&
                        (p.Name.ToLower().Contains(lowerSearchTerm) ||
                         p.NameKorean.ToLower().Contains(lowerSearchTerm) ||
@@ -136,13 +144,13 @@ public class VectorProductRepository : Repository<Product>, IVectorProductReposi
         Product productEmbedding,
         CancellationToken cancellationToken = default)
     {
-        var existing = await GetByProductCodeAsync(
-            productEmbedding.ProductCode,
-            cancellationToken);
+        // Use tracking query for update operations (not AsNoTracking)
+        var existing = await _dbSet
+            .FirstOrDefaultAsync(p => p.ProductCode == productEmbedding.ProductCode, cancellationToken);
 
         if (existing != null)
         {
-            // Update existing
+            // Update existing (tracked entity)
             existing.Name = productEmbedding.Name;
             existing.NameKorean = productEmbedding.NameKorean;
             existing.Category = productEmbedding.Category;
@@ -165,5 +173,74 @@ public class VectorProductRepository : Repository<Product>, IVectorProductReposi
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<List<Product>> GetByPriceRangeAsync(
+        decimal? minPrice,
+        decimal? maxPrice,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _dbSet.AsNoTracking().Where(p => p.IsAvailable);
+
+        if (minPrice.HasValue)
+        {
+            query = query.Where(p => p.Price >= minPrice.Value);
+        }
+
+        if (maxPrice.HasValue)
+        {
+            query = query.Where(p => p.Price <= maxPrice.Value);
+        }
+
+        return await query.ToListAsync(cancellationToken);
+    }
+
+    public async Task<List<Product>> SearchByProductNameAsync(
+        string productName,
+        CancellationToken cancellationToken = default)
+    {
+        return await _dbSet
+            .AsNoTracking()
+            .Where(p => p.IsAvailable &&
+                       (p.NameKorean.ToLower().Contains(productName.ToLower()) ||
+                        p.Name.ToLower().Contains(productName.ToLower())))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<List<Product>> SearchWithFiltersAsync(
+        decimal? minPrice,
+        decimal? maxPrice,
+        string? category,
+        string? productNameQuery,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _dbSet.AsNoTracking().Where(p => p.IsAvailable);
+
+        // Apply price filter
+        if (minPrice.HasValue)
+        {
+            query = query.Where(p => p.Price >= minPrice.Value);
+        }
+
+        if (maxPrice.HasValue)
+        {
+            query = query.Where(p => p.Price <= maxPrice.Value);
+        }
+
+        // Apply category filter
+        if (!string.IsNullOrEmpty(category))
+        {
+            query = query.Where(p => p.Category.ToLower() == category.ToLower());
+        }
+
+        // Apply product name filter
+        if (!string.IsNullOrEmpty(productNameQuery))
+        {
+            query = query.Where(p =>
+                p.NameKorean.ToLower().Contains(productNameQuery.ToLower()) ||
+                p.Name.ToLower().Contains(productNameQuery.ToLower()));
+        }
+
+        return await query.ToListAsync(cancellationToken);
     }
 }

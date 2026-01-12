@@ -13,5 +13,15 @@ public interface IPromptService
 
     string GetFaqPrompt(string query, List<FAQ> relevantFaqs);
 
+    string GetNoProductsFoundPrompt(string query);
+
     ChatCategory DetectIntent(string userMessage);
+
+    string? ExtractProductCategory(string userMessage);
+
+    (decimal? MinPrice, decimal? MaxPrice) ExtractPriceRange(string userMessage);
+
+    string? ExtractProductName(string userMessage);
+
+    double GetTemperatureForCategory(ChatCategory category);
 }
