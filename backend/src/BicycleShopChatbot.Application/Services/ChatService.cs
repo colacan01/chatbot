@@ -4,6 +4,8 @@ using System.Text;
 using System.Text.RegularExpressions;
 using BicycleShopChatbot.Application.DTOs;
 using BicycleShopChatbot.Application.Interfaces;
+using BicycleShopChatbot.Application.Configuration;
+using BicycleShopChatbot.Application.Plugins;
 using BicycleShopChatbot.Domain.Entities;
 using BicycleShopChatbot.Domain.Enums;
 using BicycleShopChatbot.Application.Interfaces.Repositories;
@@ -20,6 +22,9 @@ public class ChatService : IChatService
     private readonly IChatSessionRepository _sessionRepository;
     private readonly IChatMessageRepository _messageRepository;
     private readonly IFAQRepository _faqRepository;
+    private readonly ProductSearchPlugin _productSearchPlugin;
+    private readonly FaqSearchPlugin _faqSearchPlugin;
+    private readonly SemanticKernelSettings _skSettings;
     private readonly ILogger<ChatService> _logger;
 
     public ChatService(
@@ -30,6 +35,9 @@ public class ChatService : IChatService
         IChatSessionRepository sessionRepository,
         IChatMessageRepository messageRepository,
         IFAQRepository faqRepository,
+        ProductSearchPlugin productSearchPlugin,
+        FaqSearchPlugin faqSearchPlugin,
+        SemanticKernelSettings skSettings,
         ILogger<ChatService> logger)
     {
         _ollamaService = ollamaService;
@@ -39,6 +47,9 @@ public class ChatService : IChatService
         _sessionRepository = sessionRepository;
         _messageRepository = messageRepository;
         _faqRepository = faqRepository;
+        _productSearchPlugin = productSearchPlugin;
+        _faqSearchPlugin = faqSearchPlugin;
+        _skSettings = skSettings;
         _logger = logger;
     }
 
@@ -348,6 +359,35 @@ public class ChatService : IChatService
         string userMessage,
         CancellationToken cancellationToken)
     {
+        // Use Semantic Kernel plugin if enabled
+        if (_skSettings.Enabled)
+        {
+            try
+            {
+                _logger.LogInformation("Using Semantic Kernel ProductSearchPlugin for query: {Query}", userMessage);
+
+                var productContext = await _productSearchPlugin.SearchProductsAsync(userMessage, cancellationToken);
+
+                if (!string.IsNullOrWhiteSpace(productContext) && !productContext.Contains("검색 결과가 없습니다"))
+                {
+                    return _promptService.GetSystemPrompt(ChatCategory.ProductSearch) + "\n\n" +
+                           "========================================\n" +
+                           "[ 검색된 제품 정보 (재순위 결과) ]\n" +
+                           "========================================\n" +
+                           productContext;
+                }
+                else
+                {
+                    _logger.LogWarning("SK plugin returned no products, falling back to legacy search");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error using SK ProductSearchPlugin, falling back to legacy search");
+            }
+        }
+
+        // Fallback to existing implementation
         // Step 1: Extract ALL filters from user message
         var productName = _promptService.ExtractProductName(userMessage);
         var (minPrice, maxPrice) = _promptService.ExtractPriceRange(userMessage);
@@ -451,6 +491,35 @@ public class ChatService : IChatService
         string userMessage,
         CancellationToken cancellationToken)
     {
+        // Use Semantic Kernel plugin if enabled
+        if (_skSettings.Enabled)
+        {
+            try
+            {
+                _logger.LogInformation("Using Semantic Kernel FaqSearchPlugin for question: {Question}", userMessage);
+
+                var faqContext = await _faqSearchPlugin.SearchFaqsAsync(userMessage, cancellationToken);
+
+                if (!string.IsNullOrWhiteSpace(faqContext) && !faqContext.Contains("관련 FAQ를 찾을 수 없습니다"))
+                {
+                    return _promptService.GetSystemPrompt(ChatCategory.FAQ) + "\n\n" +
+                           "========================================\n" +
+                           "[ 관련 FAQ (재순위 결과) ]\n" +
+                           "========================================\n" +
+                           faqContext;
+                }
+                else
+                {
+                    _logger.LogWarning("SK plugin returned no FAQs, falling back to legacy search");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error using SK FaqSearchPlugin, falling back to legacy search");
+            }
+        }
+
+        // Fallback to existing implementation
         var faqs = await _faqRepository.SearchFAQsAsync(userMessage, 5, cancellationToken);
         return _promptService.GetFaqPrompt(userMessage, faqs);
     }

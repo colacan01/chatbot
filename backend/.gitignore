@@ -111,3 +111,8 @@ backend/src/BicycleShopChatbot.Api/bin/Debug/net9.0/appsettings.json
 ../scripts/VectorDataLoader/[Oo]bj/
 scripts/VectorDataLoader/[Bb]in/
 scripts/VectorDataLoader/[Oo]bj/
+
+# AI Model files (large files, download separately)
+src/BicycleShopChatbot.Api/models/**/model.onnx
+src/BicycleShopChatbot.Api/models/**/model.onnx_data
+src/BicycleShopChatbot.Api/models/**/sentencepiece.bpe.model

@@ -3,10 +3,14 @@ using BicycleShopChatbot.Api.Hubs;
 using BicycleShopChatbot.Application.DTOs;
 using BicycleShopChatbot.Application.Interfaces;
 using BicycleShopChatbot.Application.Services;
+using BicycleShopChatbot.Application.Configuration;
+using BicycleShopChatbot.Application.Plugins;
 using BicycleShopChatbot.Domain.Entities;
 using BicycleShopChatbot.Infrastructure.Auth;
 using BicycleShopChatbot.Infrastructure.Data;
 using BicycleShopChatbot.Infrastructure.Repositories.Implementation;
+using BicycleShopChatbot.Infrastructure.AI.SemanticKernel;
+using BicycleShopChatbot.Infrastructure.AI.Reranking;
 using BicycleShopChatbot.Application.Interfaces.Repositories;
 using BicycleShopChatbot.Infrastructure.Seed;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -173,6 +177,23 @@ builder.Services.AddHttpClient<IOllamaService, OllamaService>()
         };
     })
     .SetHandlerLifetime(TimeSpan.FromMinutes(30));
+
+// Semantic Kernel Configuration
+var skSettings = builder.Configuration.GetSection("SemanticKernel").Get<SemanticKernelSettings>()
+    ?? new SemanticKernelSettings();
+
+builder.Services.AddSingleton(skSettings);
+
+// ONNX Re-ranking Configuration
+var rerankSettings = builder.Configuration.GetSection("Reranking").Get<RerankingSettings>()
+    ?? new RerankingSettings();
+
+builder.Services.AddSingleton(rerankSettings);
+builder.Services.AddSingleton<IRerankingService, OnnxRerankingService>();
+
+// Register Semantic Kernel plugins as scoped (they depend on scoped repositories)
+builder.Services.AddScoped<ProductSearchPlugin>();
+builder.Services.AddScoped<FaqSearchPlugin>();
 
 builder.Services.AddLogging(logging =>
 {
