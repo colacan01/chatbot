@@ -56,19 +56,46 @@ public class DatabaseService
     }
 
     /// <summary>
-    /// product_embeddings 테이블을 생성합니다.
+    /// product_embeddings 테이블의 데이터를 삭제합니다.
     /// </summary>
-    public async Task CreateTableAsync()
+    public async Task TruncateTableAsync()
     {
         try
         {
             await using var connection = new NpgsqlConnection(_connectionString);
             await connection.OpenAsync();
 
-            var createTableSql = $@"
-                DROP TABLE IF EXISTS {TableName};
+            await using var cmd = new NpgsqlCommand($"TRUNCATE TABLE {TableName} CASCADE;", connection);
+            await cmd.ExecuteNonQueryAsync();
 
-                CREATE TABLE {TableName} (
+            Console.WriteLine($"[PostgreSQL] {TableName} 테이블 데이터 삭제(TRUNCATE) 완료");
+        }
+        catch (PostgresException ex) when (ex.SqlState == "42P01") // Undefined table
+        {
+            Console.WriteLine($"[PostgreSQL] {TableName} 테이블이 존재하지 않아 생성합니다.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERROR] 테이블 TRUNCATE 실패: {ex.Message}");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// product_embeddings 테이블을 생성합니다 (기존 데이터는 TRUNCATE로 삭제).
+    /// </summary>
+    public async Task CreateTableAsync()
+    {
+        try
+        {
+            // 기존 테이블이 있으면 데이터 삭제
+            await TruncateTableAsync();
+
+            await using var connection = new NpgsqlConnection(_connectionString);
+            await connection.OpenAsync();
+
+            var createTableSql = $@"
+                CREATE TABLE IF NOT EXISTS {TableName} (
                     id SERIAL PRIMARY KEY,
                     product_code VARCHAR(50) UNIQUE NOT NULL,
                     name VARCHAR(200) NOT NULL,
@@ -106,7 +133,7 @@ public class DatabaseService
             await using var cmd = new NpgsqlCommand(createTableSql, connection);
             await cmd.ExecuteNonQueryAsync();
 
-            Console.WriteLine($"[PostgreSQL] {TableName} 테이블 생성 완료 (벡터 차원: {VectorDimension})");
+            Console.WriteLine($"[PostgreSQL] {TableName} 테이블 준비 완료 (벡터 차원: {VectorDimension})");
         }
         catch (Exception ex)
         {

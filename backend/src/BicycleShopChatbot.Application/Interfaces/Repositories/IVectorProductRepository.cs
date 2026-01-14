@@ -59,6 +59,13 @@ public interface IVectorProductRepository : IRepository<Product>
         string? category,
         string? productNameQuery,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get products by multiple product codes (batch query for validation)
+    /// </summary>
+    Task<List<Product>> GetByProductCodesAsync(
+        IEnumerable<string> productCodes,
+        CancellationToken cancellationToken = default);
 }
 
 public class VectorSearchResult

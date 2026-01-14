@@ -25,6 +25,7 @@ public class ChatService : IChatService
     private readonly ProductSearchPlugin _productSearchPlugin;
     private readonly FaqSearchPlugin _faqSearchPlugin;
     private readonly SemanticKernelSettings _skSettings;
+    private readonly IResponseValidationService _responseValidationService;
     private readonly ILogger<ChatService> _logger;
 
     public ChatService(
@@ -38,6 +39,7 @@ public class ChatService : IChatService
         ProductSearchPlugin productSearchPlugin,
         FaqSearchPlugin faqSearchPlugin,
         SemanticKernelSettings skSettings,
+        IResponseValidationService responseValidationService,
         ILogger<ChatService> logger)
     {
         _ollamaService = ollamaService;
@@ -50,6 +52,7 @@ public class ChatService : IChatService
         _productSearchPlugin = productSearchPlugin;
         _faqSearchPlugin = faqSearchPlugin;
         _skSettings = skSettings;
+        _responseValidationService = responseValidationService;
         _logger = logger;
     }
 
@@ -106,6 +109,23 @@ public class ChatService : IChatService
             systemPrompt,
             temperature,
             cancellationToken);
+
+        // Validate and clean response for product-related intents
+        if (intent == ChatCategory.ProductSearch || intent == ChatCategory.ProductDetails)
+        {
+            var validationResult = await _responseValidationService.ValidateAndCleanResponseAsync(
+                aiResponse, cancellationToken);
+
+            if (validationResult.HasModifications)
+            {
+                _logger.LogWarning(
+                    "Response validation removed {Count} invalid product codes: {Codes}",
+                    validationResult.InvalidCodes.Count,
+                    string.Join(", ", validationResult.InvalidCodes));
+            }
+
+            aiResponse = validationResult.CleanedResponse;
+        }
 
         var assistantMessage = new ChatMessage
         {
@@ -222,14 +242,47 @@ public class ChatService : IChatService
             };
         }
 
-        // 4. 스트리밍 완료 후 DB 저장
+        // 4. 스트리밍 완료 후 응답 검증 및 DB 저장
         stopwatch.Stop();
+
+        var finalContent = fullContent.ToString();
+
+        // Validate and clean response for product-related intents
+        if (intent == ChatCategory.ProductSearch || intent == ChatCategory.ProductDetails)
+        {
+            var validationResult = await _responseValidationService.ValidateAndCleanResponseAsync(
+                finalContent, cancellationToken);
+
+            if (validationResult.HasModifications)
+            {
+                _logger.LogWarning(
+                    "Streaming response validation found {Count} invalid product codes: {Codes}",
+                    validationResult.InvalidCodes.Count,
+                    string.Join(", ", validationResult.InvalidCodes));
+
+                // 수정 청크 전송 - 사용자에게 잘못된 제품 정보 알림
+                var correctionMessage = $"\n\n---\n⚠️ **수정 안내**: 위 응답에서 언급된 일부 제품({string.Join(", ", validationResult.InvalidCodes)})은 " +
+                    "현재 판매 목록에 없는 제품입니다. 해당 내용을 무시해 주세요.";
+
+                yield return new ChatStreamChunk
+                {
+                    SessionId = request.SessionId,
+                    MessageId = messageId,
+                    Content = correctionMessage,
+                    IsComplete = false,
+                    Timestamp = DateTime.UtcNow,
+                    Category = intent.ToString()
+                };
+
+                finalContent += correctionMessage;
+            }
+        }
 
         var assistantMessage = new ChatMessage
         {
             ChatSessionId = session.Id,
             Role = MessageRole.Assistant,
-            Content = fullContent.ToString(),
+            Content = finalContent,
             Timestamp = DateTime.UtcNow,
             Category = intent,
             IntentDetected = intent.ToString(),

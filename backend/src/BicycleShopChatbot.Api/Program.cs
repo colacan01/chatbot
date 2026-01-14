@@ -184,12 +184,52 @@ var skSettings = builder.Configuration.GetSection("SemanticKernel").Get<Semantic
 
 builder.Services.AddSingleton(skSettings);
 
-// ONNX Re-ranking Configuration
+// Reranking Configuration
 var rerankSettings = builder.Configuration.GetSection("Reranking").Get<RerankingSettings>()
     ?? new RerankingSettings();
 
 builder.Services.AddSingleton(rerankSettings);
-builder.Services.AddSingleton<IRerankingService, OnnxRerankingService>();
+
+// Register ONNX reranking service (always available)
+builder.Services.AddSingleton<OnnxRerankingService>();
+
+// Register Ollama reranking service with dedicated HttpClient
+builder.Services.AddHttpClient<OllamaRerankingService>()
+    .ConfigurePrimaryHttpMessageHandler(() =>
+    {
+        return new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+            MaxConnectionsPerServer = 5,
+            KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+            KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
+            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
+            ConnectTimeout = TimeSpan.FromSeconds(30)
+        };
+    })
+    .SetHandlerLifetime(TimeSpan.FromMinutes(30));
+
+// Register IRerankingService based on configured provider
+builder.Services.AddSingleton<IRerankingService>(sp =>
+{
+    var settings = sp.GetRequiredService<RerankingSettings>();
+    var logger = sp.GetRequiredService<ILogger<Program>>();
+
+    logger.LogInformation("Reranking provider configured: {Provider}", settings.Provider);
+
+    return settings.Provider switch
+    {
+        RerankingProvider.Ollama => sp.GetRequiredService<OllamaRerankingService>(),
+        RerankingProvider.Onnx => sp.GetRequiredService<OnnxRerankingService>(),
+        _ => sp.GetRequiredService<OnnxRerankingService>()
+    };
+});
+
+// Response Validation Configuration
+builder.Services.Configure<ResponseValidationSettings>(
+    builder.Configuration.GetSection("ResponseValidation"));
+builder.Services.AddScoped<IResponseValidationService, ResponseValidationService>();
 
 // Register Semantic Kernel plugins as scoped (they depend on scoped repositories)
 builder.Services.AddScoped<ProductSearchPlugin>();

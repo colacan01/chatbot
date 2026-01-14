@@ -11,7 +11,7 @@ public class OllamaService
     private const string LlmModel = "exaone3.5:7.8b";
     private const string EmbeddingModel = "nomic-embed-text";
 
-    public OllamaService(string baseUrl = "http://localhost:11434")
+    public OllamaService(string baseUrl = "http://172.30.1.40:11434")
     {
         _baseUrl = baseUrl;
         _httpClient = new HttpClient
@@ -25,7 +25,7 @@ public class OllamaService
     /// </summary>
     public async Task<string> GenerateProductDescriptionAsync(Product product)
     {
-        var prompt = $@"다음은 자전거 온라인 쇼핑몰의 제품 정보입니다. 이 제품에 대한 자연스럽고 매력적인 상세 설명을 200-300자 분량으로 작성해주세요.
+        var prompt = $@"다음은 동협스포츠 온라인 쇼핑몰의 제품 정보입니다. 이 제품에 대한 자연스럽고 매력적인 상세 설명을 300자 분량으로 작성해주세요.
 
 제품명: {product.NameKorean} ({product.Name})
 카테고리: {product.Category}

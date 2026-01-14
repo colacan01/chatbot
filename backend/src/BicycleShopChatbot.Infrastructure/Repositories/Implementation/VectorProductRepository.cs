@@ -243,4 +243,24 @@ public class VectorProductRepository : Repository<Product>, IVectorProductReposi
 
         return await query.ToListAsync(cancellationToken);
     }
+
+    public async Task<List<Product>> GetByProductCodesAsync(
+        IEnumerable<string> productCodes,
+        CancellationToken cancellationToken = default)
+    {
+        var codeList = productCodes.ToList();
+
+        if (!codeList.Any())
+        {
+            return new List<Product>();
+        }
+
+        // Case-insensitive comparison using ToUpper
+        var upperCodes = codeList.Select(c => c.ToUpperInvariant()).ToList();
+
+        return await _dbSet
+            .AsNoTracking()
+            .Where(p => upperCodes.Contains(p.ProductCode.ToUpper()))
+            .ToListAsync(cancellationToken);
+    }
 }
